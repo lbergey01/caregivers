@@ -111,6 +111,17 @@ v1 has SMS plumbing + email available but no triggers are wired. Future idea (us
 - Update audits skip the row when before === after — drags that land at the same minute don't pollute the log.
 - `cg/admin_audit.php`: from/to + action + caregiver + shift-id filters, badge-colored action verbs, deep-link to the shift's date/modal for non-delete rows, diff summary for updates. Capped to 1000 rows per page; uses JSON_EXTRACT on the snapshot columns for the caregiver filter (works on MariaDB 10.2+/MySQL 5.7+).
 
+### Manager role + caregiver audit log (2026-05-19)
+- New permission id 4 = `Manager`. Helpers in `cg_init.php`: `cg_isManager()` (true for admin OR manager), `CG_PERM_MANAGER` constant. Patch in `install/patches/2026-05-19_manager_and_caregiver_audit.php`.
+- **Manager scope**: caregivers admin (add/edit, modal-based), SMS section of settings, full shift editing (same as admin via `cg_canEditShift`). Cannot see: pay rates, payroll, clients, holidays, schedule log, caregiver log, default-client / overnight-window settings.
+- `cg_canEditShift($shift)` now returns true for `cg_isManager()` (covers admin) — managers can drag/resize/reassign any shift. `api/shifts.php` introduces `$can_assign_anyone = $is_manager` so managers can create shifts for any caregiver (caregivers still must self-schedule).
+- `admin_settings.php` shows the SMS card + Send-Test card to managers; the General (default client) and Overnight-Window cards are wrapped in `if ($is_admin)` and the POST handler silently ignores those keys when posted by a non-admin.
+- `admin.php` hub gates each card by an `admin_only` boolean; managers see Caregivers + Settings only. Calendar header `Admin` button shows when `$is_manager`.
+- Calendar JS `IS_ADMIN` const is now sourced from `$is_manager` — keeps the name, broadens the meaning (used for "can pick any caregiver" / "can drag any event" UX).
+- **Caregivers admin redesign**: inline row = color swatch + name + phone + pencil-icon (Bootstrap SVG path inlined). All editing happens inside the per-row modal (name, phone, email, linked login, color, active). Modal-as-form: each `<form>` wraps a modal so submit goes through one path. Modals are rendered after the table so the `<tr>` boundary stays clean.
+- **Caregiver audit log**: `cg_caregiver_audit` parallels `cg_shift_audit`. Snapshots taken via `cg_caregiverSnapshot()` (includes pay fields too, so future pay-rate edits also log). `cg_logCaregiverAudit()` wraps the insert. Hooks on `add` and `update` in `admin_caregivers.php`. No hard-delete UI; soft-delete via Active=0 captures naturally as an update row.
+- `admin_caregiver_audit.php` is admin-only (not manager) — pattern matches `admin_audit.php`. Diff summary walks a label map of the snapshotted fields and renders only changed keys.
+
 ### To use the app
 1. Log in as the UserSpice admin.
 2. Go to `/caregivers/cg/admin_caregivers.php` — add caregivers. Linking a UserSpice user grants them the Caregiver permission automatically.

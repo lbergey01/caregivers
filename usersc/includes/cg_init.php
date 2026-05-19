@@ -5,6 +5,7 @@
 if (!defined('CG_PERM_CAREGIVER')) {
     define('CG_PERM_CAREGIVER', 3);   // permissions.id seeded by install_cg_schema.sql
     define('CG_PERM_ADMIN', 2);
+    define('CG_PERM_MANAGER', 4);     // seeded by install/patches/2026-05-19_manager_and_caregiver_audit.php
 }
 
 // Idempotent SMS-settings seed. First page-load on a fresh install populates
@@ -19,6 +20,8 @@ require_once dirname(__DIR__, 2) . '/install/patches/2026-05-19_payroll.php';
 cg_patch_2026_05_19_payroll();
 require_once dirname(__DIR__, 2) . '/install/patches/2026-05-19_shift_audit.php';
 cg_patch_2026_05_19_shift_audit();
+require_once dirname(__DIR__, 2) . '/install/patches/2026-05-19_manager_and_caregiver_audit.php';
+cg_patch_2026_05_19_manager_and_caregiver_audit();
 
 // Auto-revive UserSpice session from a still-valid pwsms cookie. Skipped when
 // the user is already password-logged-in. Lets a returning caregiver land on
@@ -60,6 +63,15 @@ function cg_isCaregiver() {
     return hasPerm([CG_PERM_CAREGIVER]);
 }
 
+// Manager: a delegated admin who can manage caregivers, SMS settings, and any
+// shift, but does NOT see pay rates, payroll, clients, holidays, or the
+// audit/log pages. Admins also satisfy isManager.
+function cg_isManager() {
+    global $user;
+    if (!$user || !$user->isLoggedIn()) return false;
+    return hasPerm([CG_PERM_ADMIN, CG_PERM_MANAGER]);
+}
+
 // Caregiver row linked to currently logged-in user, or null.
 function cg_currentCaregiver() {
     global $user, $db;
@@ -71,7 +83,7 @@ function cg_currentCaregiver() {
 
 // Can the current user edit a given shift?
 function cg_canEditShift($shift) {
-    if (cg_isAdmin()) return true;
+    if (cg_isManager()) return true;   // covers admin + manager
     $me = cg_currentCaregiver();
     if (!$me) return false;
     return (int)$shift->caregiver_id === (int)$me->id;
@@ -113,6 +125,57 @@ function cg_logShiftAudit($shift_id, $action, $before, $after) {
          VALUES (?, ?, ?, ?, ?, ?, ?)',
         [
             $shift_id,
+            $action,
+            $actor_user_id,
+            $actor_cg_id,
+            $actor_name,
+            $before !== null ? json_encode($before) : null,
+            $after  !== null ? json_encode($after)  : null,
+        ]
+    );
+}
+
+/* ---------- caregiver audit log ---------- */
+
+// Subset of cg_caregivers fields written to the audit log. Excludes created_at + id.
+function cg_caregiverSnapshot($cg) {
+    if (!$cg) return null;
+    return [
+        'name'          => $cg->name,
+        'phone'         => $cg->phone,
+        'email'         => $cg->email,
+        'user_id'       => $cg->user_id !== null ? (int)$cg->user_id : null,
+        'color'         => $cg->color,
+        'active'        => (int)$cg->active,
+        'payable'       => isset($cg->payable)        ? (int)$cg->payable        : null,
+        'pay_rate'      => isset($cg->pay_rate)        ? $cg->pay_rate            : null,
+        'diff_ot_mult'  => isset($cg->diff_ot_mult)    ? $cg->diff_ot_mult        : null,
+        'diff_ot_add'   => isset($cg->diff_ot_add)     ? $cg->diff_ot_add         : null,
+        'diff_hol_mult' => isset($cg->diff_hol_mult)   ? $cg->diff_hol_mult       : null,
+        'diff_hol_add'  => isset($cg->diff_hol_add)    ? $cg->diff_hol_add        : null,
+    ];
+}
+
+function cg_logCaregiverAudit($caregiver_id, $action, $before, $after) {
+    global $db, $user;
+    $actor_user_id = $actor_cg_id = null;
+    $actor_name = null;
+    if (isset($user) && $user->isLoggedIn()) {
+        $actor_user_id = (int)$user->data()->id;
+        $actor_name    = trim(($user->data()->fname ?? '') . ' ' . ($user->data()->lname ?? ''));
+        if ($actor_name === '') $actor_name = $user->data()->username ?? null;
+        $cg = cg_currentCaregiver();
+        if ($cg) {
+            $actor_cg_id = (int)$cg->id;
+            $actor_name  = $cg->name;
+        }
+    }
+    $db->query(
+        'INSERT INTO cg_caregiver_audit
+           (caregiver_id, action, actor_user_id, actor_caregiver_id, actor_name, before_json, after_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [
+            $caregiver_id,
             $action,
             $actor_user_id,
             $actor_cg_id,

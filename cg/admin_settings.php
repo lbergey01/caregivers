@@ -4,25 +4,32 @@ require_once $abs_us_root . $us_url_root . 'usersc/includes/cg_init.php';
 require_once $abs_us_root . $us_url_root . 'usersc/includes/sms.php';
 
 if (!$user->isLoggedIn()) { Redirect::to($us_url_root . 'users/login.php'); die(); }
-if (!cg_isAdmin()) { die('Admin only.'); }
+// Managers may access SMS only; admins see everything.
+if (!cg_isManager()) { die('Admin or manager only.'); }
+$is_admin = cg_isAdmin();
 
 $msg = $err = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
     if ($action === 'save') {
-        $keys = ['sms_provider','sms_user_id','sms_pass','sms_did',
-                 'sms_private_ip','sms_private_port','sms_private_user','sms_private_pass',
-                 'default_client_id'];
-        foreach ($keys as $k) {
+        // SMS keys — always settable by manager+admin.
+        $sms_keys = ['sms_provider','sms_user_id','sms_pass','sms_did',
+                     'sms_private_ip','sms_private_port','sms_private_user','sms_private_pass'];
+        foreach ($sms_keys as $k) {
             if (isset($_POST[$k])) cg_setting_set($k, trim($_POST[$k]));
         }
-        // Overnight window — clamp to 0..23 so a typo can't disable the differential silently.
-        if (isset($_POST['ot_start_hour'])) {
-            cg_setting_set('ot_start_hour', max(0, min(23, (int)$_POST['ot_start_hour'])));
-        }
-        if (isset($_POST['ot_end_hour'])) {
-            cg_setting_set('ot_end_hour', max(0, min(23, (int)$_POST['ot_end_hour'])));
+        // Admin-only keys — silently ignore if a manager somehow posts them.
+        if ($is_admin) {
+            if (isset($_POST['default_client_id'])) {
+                cg_setting_set('default_client_id', trim($_POST['default_client_id']));
+            }
+            if (isset($_POST['ot_start_hour'])) {
+                cg_setting_set('ot_start_hour', max(0, min(23, (int)$_POST['ot_start_hour'])));
+            }
+            if (isset($_POST['ot_end_hour'])) {
+                cg_setting_set('ot_end_hour', max(0, min(23, (int)$_POST['ot_end_hour'])));
+            }
         }
         $msg = 'Settings saved.';
     } elseif ($action === 'test_sms') {
@@ -51,6 +58,7 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
   <form method="post">
     <input type="hidden" name="action" value="save">
 
+    <?php if ($is_admin): ?>
     <div class="card mb-3">
       <div class="card-header">General</div>
       <div class="card-body">
@@ -86,6 +94,7 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
         </div>
       </div>
     </div>
+    <?php endif; ?>
 
     <div class="card mb-3">
       <div class="card-header">SMS</div>

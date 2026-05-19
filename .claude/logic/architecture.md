@@ -24,6 +24,13 @@
 - **cg_caregivers (payroll columns, added 2026-05-19)** — `payable` (TINYINT), `pay_rate` (DECIMAL NULL), `diff_ot_mult`, `diff_ot_add`, `diff_hol_mult`, `diff_hol_add`
 - **cg_holidays** — `hdate` DATE PK, `name`
 - **cg_shift_audit** — `id, shift_id, action ENUM(insert/update/delete), actor_user_id, actor_caregiver_id, actor_name, before_json, after_json, created_at`. Every call to `cg_createShift`/`cg_updateShift`/`cg_deleteShift` writes one row via `cg_logShiftAudit`.
+- **cg_caregiver_audit** — same shape as `cg_shift_audit` but for `cg_caregivers`. Written from `admin_caregivers.php` via `cg_logCaregiverAudit` on add/update.
+
+## Permissions
+- Level 2 = Admin (UserSpice built-in). Full access.
+- Level 3 = Caregiver. Can view all shifts; can edit only shifts where they are the assigned caregiver.
+- Level 4 = Manager. Can add/edit caregivers, edit any shift (like admin), and edit SMS settings. Cannot see pay rates, payroll, clients, holidays, or activity logs.
+- Helpers: `cg_isAdmin()`, `cg_isManager()` (true for admin OR manager), `cg_isCaregiver()`, `cg_canEditShift($shift)` (manager-or-shift-owner).
 
 ## Schema migrations
 - DB schema changes are done via PHP files under `install/patches/`, auto-included from `cg_init.php`. Each patch defines an idempotent `cg_patch_*` function with a static guard. Re-runnable; first page-load on a fresh DB upgrades it. Do NOT apply schema changes by hand on the live DB only — always write the patch.

@@ -80,9 +80,11 @@ if ($method === 'GET') {
 if ($method === 'POST') {
     $action = $_POST['action'] ?? '';
     $me_cg  = cg_currentCaregiver();
-    $is_admin = cg_isAdmin();
+    $is_admin   = cg_isAdmin();
+    $is_manager = cg_isManager(); // true for admins too — superset of admin
+    $can_assign_anyone = $is_manager; // admin OR manager — caregivers must self-schedule
 
-    if (!$is_admin && !$me_cg) jerr(403, 'You are not linked to a caregiver record.');
+    if (!$is_manager && !$me_cg) jerr(403, 'You are not linked to a caregiver record.');
 
     if ($action === 'create') {
         $client_id    = (int)($_POST['client_id'] ?? cg_defaultClientId());
@@ -90,7 +92,7 @@ if ($method === 'POST') {
         $start_dt     = $_POST['start_dt'];
         $end_dt       = $_POST['end_dt'];
 
-        if (!$is_admin && $caregiver_id !== (int)$me_cg->id) {
+        if (!$can_assign_anyone && $caregiver_id !== (int)$me_cg->id) {
             jerr(403, 'Caregivers may only schedule themselves.');
         }
         try {
@@ -109,7 +111,7 @@ if ($method === 'POST') {
         if (!cg_canEditShift($shift)) jerr(403, 'Not allowed.');
 
         $caregiver_id = (int)$_POST['caregiver_id'];
-        if (!$is_admin && $caregiver_id !== (int)$me_cg->id) {
+        if (!$can_assign_anyone && $caregiver_id !== (int)$me_cg->id) {
             jerr(403, 'Caregivers may only schedule themselves.');
         }
         try {

@@ -5,6 +5,7 @@ require_once $abs_us_root . $us_url_root . 'usersc/includes/cg_init.php';
 if (!$user->isLoggedIn()) { Redirect::to($us_url_root . 'users/login.php'); die(); }
 
 $is_admin    = cg_isAdmin();
+$is_manager  = cg_isManager(); // admin OR manager
 $is_cg       = cg_isCaregiver();
 $me_cg       = cg_currentCaregiver();
 $caregivers  = cg_caregiversAll(true);
@@ -70,17 +71,17 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
           <?php endforeach; ?>
         </select>
       <?php endif; ?>
-      <?php if ($is_admin || $me_cg): ?>
+      <?php if ($is_manager || $me_cg): ?>
         <button id="btnAddShift" class="btn btn-sm btn-primary">+ Add Shift</button>
       <?php endif; ?>
       <a class="btn btn-sm btn-outline-secondary" href="history.php">History</a>
-      <?php if ($is_admin): ?>
+      <?php if ($is_manager): ?>
         <a class="btn btn-sm btn-outline-secondary" href="admin.php">Admin</a>
       <?php endif; ?>
     </div>
   </div>
 
-  <?php if (!$is_admin && !$me_cg): ?>
+  <?php if (!$is_manager && !$me_cg): ?>
     <div class="alert alert-warning">Your account isn't linked to a caregiver record yet, so you can view but not schedule. Ask an admin to link you on the Caregivers page.</div>
   <?php endif; ?>
 
@@ -108,7 +109,7 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
                 </option>
               <?php endforeach; ?>
             </select>
-            <?php if (!$is_admin && $me_cg): ?>
+            <?php if (!$is_manager && $me_cg): ?>
               <small class="text-muted">You can only schedule yourself.</small>
             <?php endif; ?>
           </div>
@@ -165,7 +166,9 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
 
 <script>
 (function(){
-  const IS_ADMIN  = <?= $is_admin ? 'true' : 'false' ?>;
+  // IS_ADMIN = "can act on anyone's shift" — true for admins AND managers.
+  // The name is kept for historical reasons; the meaning is the broader permission.
+  const IS_ADMIN  = <?= $is_manager ? 'true' : 'false' ?>;
   const ME_CG_ID  = <?= $me_cg ? (int)$me_cg->id : 'null' ?>;
   const CLIENT_ID = <?= (int)$default_cid ?>;
   let currentClient = CLIENT_ID;
