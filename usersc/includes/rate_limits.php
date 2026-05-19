@@ -152,3 +152,25 @@ if (defined('US_ENVIRONMENT') && US_ENVIRONMENT === 'development') {
     unset($limits, $value); // Clean up references
 }
 */
+
+/* ---------- pwsms (passwordless SMS) actions ----------
+ * Used by usersc/includes/pwsms_*.php. Counts live in pwsms_ip_blacklist;
+ * bumping ip_max immediately un-blocks any IP whose count is below the new
+ * threshold (no DB edits needed).
+ */
+$rateLimits['sms_request'] = [
+    'ip_max' => 4,       // Max SMS sends per IP per window
+    'ip_window' => 3600, // 1 hour
+    'total_max' => 20,
+    'total_window' => 3600,
+];
+
+$rateLimits['auth_token_failure'] = [
+    'ip_max' => 8,       // Per-IP consecutive token failures before silent-block
+    'ip_window' => 900,
+];
+
+$rateLimits['invalid_phone_lookup'] = [
+    'ip_max' => 5,       // Consecutive unknown-phone submissions before silent-block
+    'ip_window' => 1800,
+];

@@ -15,7 +15,16 @@
       "Bash(/c/xampp/php/php.exe -r \"echo 'upload_max_filesize=' . ini_get\\('upload_max_filesize'\\) . ', post_max_size=' . ini_get\\('post_max_size'\\) . ', file_uploads=' . ini_get\\('file_uploads'\\) . PHP_EOL;\")",
       "Bash(/c/xampp/php/php.exe -l /c/xampp/htdocs/caregivers/cg/api/attachment.php)",
       "Bash(/c/xampp/mysql/bin/mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 caregivers -e \"SELECT * FROM cg_shifts LIMIT 10; SELECT COUNT\\(*\\) FROM cg_caregivers; SELECT * FROM cg_caregivers LIMIT 10;\")",
-      "Bash(/c/xampp/php/php.exe /c/xampp/htdocs/caregivers/_cg_window_test.php)"
+      "Bash(/c/xampp/php/php.exe /c/xampp/htdocs/caregivers/_cg_window_test.php)",
+      "Bash(mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 caregivers -e \"SHOW TABLES LIKE 'page_access'; DESCRIBE cg_caregivers;\")",
+      "Bash(mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 -e \"SHOW FUNCTION STATUS WHERE Db='caregivers' AND Name='PhoneEdit';\")",
+      "Bash(mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 vbs -e \"SHOW CREATE TABLE page_access\\\\G\")",
+      "Bash(grep -n '$rateLimits' c:/xampp/htdocs/caregivers/users/includes/rate_limits.php)",
+      "Bash(php -l c:/xampp/htdocs/caregivers/secure_login.php)",
+      "Bash(php -l c:/xampp/htdocs/caregivers/usersc/includes/pwsms_auth.php)",
+      "Bash(php -l c:/xampp/htdocs/caregivers/usersc/includes/pwsms_config.php)",
+      "Bash(php -l c:/xampp/htdocs/caregivers/usersc/includes/pwsms_acl.php)",
+      "Bash(php -l c:/xampp/htdocs/caregivers/usersc/includes/pwsms_error_pages.php)"
     ],
     "additionalDirectories": [
       "C:\\xampp\\htdocs\\caregivers\\.claude"

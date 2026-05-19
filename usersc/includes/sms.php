@@ -58,7 +58,7 @@ function cg_sendSMS($to, $message) {
     }
     $dest = '1' . $cell;
 
-    $provider = $cfg['sms_provider'] ?? 'voipms';
+    $provider = $cfg['sms_provider'] ?? 'private';
 
     if ($provider === 'private') {
         return cg_sendSMSPrivate($dest, $message, $cfg);
