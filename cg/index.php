@@ -164,6 +164,19 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
               <input type="datetime-local" name="end_dt" id="f_end" class="form-control" step="60" required>
             </div>
           </div>
+
+          <div id="shiftFormErr" class="alert alert-danger d-none mt-2"></div>
+
+          <!-- Shift action buttons sit above the notes area so the user doesn't
+               have to scroll past a long shift-log to save/cancel/delete. -->
+          <div class="d-flex justify-content-between align-items-center mt-3">
+            <button type="button" class="btn btn-danger d-none" id="btnDelete">Delete</button>
+            <div class="ms-auto">
+              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+              <button type="submit" class="btn btn-primary">Save</button>
+            </div>
+          </div>
+
           <div id="notesSection" class="mt-3 d-none">
             <label class="form-label mb-1">Shift log</label>
             <div id="notesList" class="mb-3"></div>
@@ -184,20 +197,11 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
                 <button type="button" id="btnNotePhoto"   class="btn btn-outline-primary btn-sm">📷 Photo</button>
                 <button type="button" id="btnNoteAttach"  class="btn btn-outline-secondary btn-sm">📎 Attachment</button>
                 <div class="ms-auto">
-                  <button type="button" id="btnNotePost" class="btn btn-primary btn-sm">Post note</button>
+                  <button type="button" id="btnNotePost" class="btn btn-primary btn-sm">Save Note</button>
                 </div>
               </div>
               <div id="noteErr" class="text-danger small mt-1"></div>
             </div>
-          </div>
-
-          <div id="shiftFormErr" class="alert alert-danger d-none mt-2"></div>
-        </div>
-        <div class="modal-footer justify-content-between">
-          <button type="button" class="btn btn-danger d-none" id="btnDelete">Delete</button>
-          <div>
-            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-            <button type="submit" class="btn btn-primary">Save</button>
           </div>
         </div>
       </form>
@@ -288,7 +292,8 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
         start:        info.event.start,
         end:          info.event.end,
         caregiver_id: info.event.extendedProps.caregiver_id,
-        can_edit:     info.event.extendedProps.can_edit
+        can_edit:     info.event.extendedProps.can_edit,
+        note_count:   info.event.extendedProps.note_count || 0
       });
     },
     eventDrop:   function(info) { persistEventChange(info, 'Move'); },
@@ -454,7 +459,11 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
     const editing = !!opts.id;
     document.getElementById('shiftModalTitle').textContent = editing ? 'Edit Shift' : 'Add Shift';
     const canEdit = !editing || opts.can_edit;
-    $('btnDelete').classList.toggle('d-none', !editing || !canEdit);
+    // Shifts with notes can't be deleted (the shift log must not be orphaned).
+    // Server enforces this too; hiding the button keeps users from a frustrating
+    // round-trip when they already see "1 *" on the calendar event.
+    const hasNotes = (opts.note_count || 0) > 0;
+    $('btnDelete').classList.toggle('d-none', !editing || !canEdit || hasNotes);
     modalEl.querySelector('button[type="submit"]').classList.toggle('d-none', !canEdit);
 
     // Notes timeline: only shows after the shift exists.

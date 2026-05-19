@@ -132,7 +132,11 @@ if ($method === 'POST') {
         $shift = cg_getShift($id);
         if (!$shift) jerr(404, 'Shift not found.');
         if (!cg_canEditShift($shift)) jerr(403, 'Not allowed.');
-        cg_deleteShift($id);
+        try {
+            cg_deleteShift($id);
+        } catch (Throwable $e) {
+            jerr(409, $e->getMessage());
+        }
         echo json_encode(['ok' => true]);
         exit;
     }

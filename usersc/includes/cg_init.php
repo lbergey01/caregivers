@@ -249,8 +249,15 @@ function cg_updateShift($id, $caregiver_id, $start_dt, $end_dt) {
 
 function cg_deleteShift($id) {
     global $db;
+    // Shifts with notes are protected — the shift log is the historical record
+    // and we must not orphan it. The UI hides the Delete button in this case
+    // but the server is the source of truth.
+    $note_count = (int)$db->query('SELECT COUNT(*) AS n FROM cg_shift_notes WHERE shift_id = ?', [$id])->first()->n;
+    if ($note_count > 0) {
+        throw new Exception('Cannot delete a shift that has notes. Remove the notes first or just edit the shift.');
+    }
     $before = cg_shiftSnapshot(cg_getShift($id));
-    // Cascading cleanup: delete attachments on disk + DB rows + notes
+    // Cascading cleanup: attachments on disk + DB rows (notes are guaranteed empty by the check above)
     $atts = $db->query('SELECT id, shift_id, filename FROM cg_shift_attachments WHERE shift_id = ?', [$id])->results();
     global $abs_us_root, $us_url_root;
     $root = $abs_us_root . $us_url_root . 'usersc/uploads/cg_shifts';
@@ -259,7 +266,6 @@ function cg_deleteShift($id) {
         if (is_file($p)) @unlink($p);
     }
     $db->query('DELETE FROM cg_shift_attachments WHERE shift_id = ?', [$id]);
-    $db->query('DELETE FROM cg_shift_notes       WHERE shift_id = ?', [$id]);
     $db->query('DELETE FROM cg_shifts            WHERE id       = ?', [$id]);
     cg_logShiftAudit($id, 'delete', $before, null);
 }
