@@ -74,7 +74,9 @@
       "Bash(php -l c:/xampp/htdocs/caregivers/cg/admin.php)",
       "Bash(php -l c:/xampp/htdocs/caregivers/cg/admin_audit.php)",
       "Bash(mysql -h 192.168.1.95 -u root -pGotMilk#01 caregivers -e \"SHOW CREATE TABLE cg_shift_audit\\\\G\")",
-      "Bash(curl -s -o /dev/null -w \"calendar: %{http_code}\\\\n\" \"http://localhost/caregivers/cg/index.php\")"
+      "Bash(curl -s -o /dev/null -w \"calendar: %{http_code}\\\\n\" \"http://localhost/caregivers/cg/index.php\")",
+      "Bash(git -C c:/xampp/htdocs/caregivers log --oneline -- cg/admin_caregivers.php)",
+      "Bash(git -C c:/xampp/htdocs/caregivers show 2d9a19a:cg/admin_caregivers.php)"
     ],
     "additionalDirectories": [
       "C:\\xampp\\htdocs\\caregivers\\.claude",

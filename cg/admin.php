@@ -14,7 +14,8 @@ $hol_count   = (int)$db->query('SELECT COUNT(*) AS n FROM cg_holidays')->first()
 $audit_recent = (int)$db->query('SELECT COUNT(*) AS n FROM cg_shift_audit WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)')->first()->n;
 
 $sections = [
-    ['admin_caregivers.php', 'Caregivers',  "$cg_count active",     'Add or edit caregivers, link logins, set pay rates and differentials.'],
+    ['admin_caregivers.php', 'Caregivers',  "$cg_count active",     'Add or edit caregivers, link logins, set colors.'],
+    ['admin_pay_rates.php',  'Pay Rates',   '',                     'Per-caregiver rate, payable flag, and overnight/holiday differentials.'],
     ['admin_clients.php',    'Clients',     "$cl_count active",     'Manage the people receiving care.'],
     ['admin_payroll.php',    'Payroll',     'Run report',           'Hours worked by date range, grouped by caregiver, with $ totals.'],
     ['admin_holidays.php',   'Holidays',    "$hol_count defined",   'Dates that trigger each caregiver\'s holiday differential.'],
