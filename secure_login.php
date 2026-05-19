@@ -16,14 +16,15 @@ require_once $abs_us_root . $us_url_root . 'usersc/includes/cg_init.php';
 require_once $abs_us_root . $us_url_root . 'usersc/includes/sms.php';
 require_once $abs_us_root . $us_url_root . 'usersc/includes/pwsms_auth.php';
 
-// Already password-logged-in? Skip the SMS dance entirely.
-if ($user->isLoggedIn()) {
-    header('Location: ' . $us_url_root . pwsms_cfg('landing_page', 'cg/index.php'));
-    exit;
-}
-
 $siteName    = pwsms_cfg('site_name', 'Site');
 $landingPage = $us_url_root . pwsms_cfg('landing_page', 'cg/index.php');
+
+// Already authenticated? (Password login, or cookie-revive that ran in
+// cg_init.php above.) Skip the SMS dance entirely.
+if ($user->isLoggedIn()) {
+    header('Location: ' . $landingPage);
+    exit;
+}
 
 // ---- Branch 2: SMS-link click. Token in URL. ----
 if (!empty($_GET['ln']) || !empty($_GET['uniqueid'])) {

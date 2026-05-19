@@ -52,7 +52,8 @@
       "Bash(mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 vbs_tmc -e \"SELECT table_name, column_name FROM information_schema.columns WHERE table_schema='vbs_tmc' AND column_name LIKE 'sms_%';\")",
       "Bash(mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 vbs_tmc -e \"SELECT sms_provider, sms_user_id, sms_pass, sms_did, sms_private_ip, sms_private_port, sms_private_user, sms_private_pass FROM config\\\\G\")",
       "Bash(php c:/tmp/seed_run.php)",
-      "Bash(mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 caregivers -e \"UPDATE cg_settings SET sval='private' WHERE skey='sms_provider' AND sval='voipms'; SELECT skey, sval FROM cg_settings WHERE skey='sms_provider';\")"
+      "Bash(mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 caregivers -e \"UPDATE cg_settings SET sval='private' WHERE skey='sms_provider' AND sval='voipms'; SELECT skey, sval FROM cg_settings WHERE skey='sms_provider';\")",
+      "Bash(php -l c:/xampp/htdocs/caregivers/usersc/includes/cg_init.php)"
     ],
     "additionalDirectories": [
       "C:\\xampp\\htdocs\\caregivers\\.claude"

@@ -61,9 +61,13 @@ function pwsms_config() {
         // Called once after a token+device validates. Use it to start a
         // host-level session. Receives (user_id, phone).
         'on_auth_success' => function ($user_id, $phone) {
-            // Start a UserSpice session for this user — every $user->isLoggedIn()
-            // check downstream just works.
+            global $user;
+            // Start a UserSpice session for this user.
             Session::put(Config::get('session/session_name'), (int)$user_id);
+            // users/init.php instantiated $user BEFORE we set the session, so
+            // $user->isLoggedIn() would still be false on the current request.
+            // Re-instantiate so downstream code in the same request sees the login.
+            $user = new User();
         },
     ];
 

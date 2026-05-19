@@ -13,6 +13,14 @@ if (!defined('CG_PERM_CAREGIVER')) {
 require_once __DIR__ . '/cg_seed_sms.php';
 cg_seed_sms_settings();
 
+// Auto-revive UserSpice session from a still-valid pwsms cookie. Skipped when
+// the user is already password-logged-in. Lets a returning caregiver land on
+// any cg/ page without re-doing SMS verification.
+if (!isset($user) || !$user->isLoggedIn()) {
+    require_once __DIR__ . '/pwsms_auth.php';
+    pwsms_revive_from_cookie();
+}
+
 /* ---------- settings ---------- */
 
 function cg_settings() {

@@ -173,7 +173,7 @@ function pwsms_validate_existing_token_session($uniqueId, $pageAccess, $options)
         pwsms_show_error('session_mismatch');
     }
 
-    pwsms_update_last_access($uniqueId);
+    pwsms_slide_session($uniqueId, $cookieData, $options['session_days']);
     pwsms_clear_failures('auth_token_failure');
     pwsms_log('access_granted', $uniqueId, $pageAccess->contact_info);
 
@@ -273,6 +273,71 @@ function pwsms_update_last_access($uniqueId) {
     } catch (Exception $e) {
         error_log("pwsms: failed to update last_access: " . $e->getMessage());
     }
+}
+
+/**
+ * Slide the session expiry forward and refresh the cookie's max-age.
+ * Called on every successful authorization so an active session keeps
+ * extending its 120-day window.
+ */
+function pwsms_slide_session($uniqueId, $cookieData, $sessionDays) {
+    global $db;
+    $newExpiresAt = date('Y-m-d H:i:s', strtotime('+' . (int)$sessionDays . ' days'));
+    try {
+        $db->query(
+            "UPDATE page_access
+             SET last_access = NOW(), access_count = access_count + 1, expires_at = ?
+             WHERE unique_id = ?",
+            [$newExpiresAt, $uniqueId]
+        );
+    } catch (Exception $e) {
+        error_log("pwsms: slide_session UPDATE failed: " . $e->getMessage());
+    }
+    if ($cookieData) {
+        pwsms_set_cookie($cookieData, $sessionDays);
+    }
+}
+
+/**
+ * Non-redirecting cookie revive. Call this on entry points where we want a
+ * returning user with a still-valid pwsms cookie to be transparently logged
+ * back in — no SMS link needed.
+ *
+ * Returns true if a session was revived (host hook fired).
+ */
+function pwsms_revive_from_cookie() {
+    global $db;
+
+    $cookieData = pwsms_get_cookie_data();
+    if (!$cookieData || empty($cookieData['token'])) {
+        return false;
+    }
+
+    $row = $db->query(
+        "SELECT * FROM page_access
+         WHERE session_token = ? AND is_active = 1
+           AND (expires_at IS NULL OR expires_at > NOW())",
+        [$cookieData['token']]
+    )->first();
+
+    if (!$row) {
+        return false;
+    }
+
+    $hook = pwsms_cfg('on_auth_success');
+    if (!is_callable($hook)) return false;
+
+    $userId = pwsms_resolve_user_id($row->contact_info);
+    if ($userId === null) {
+        return false;
+    }
+
+    pwsms_slide_session($row->unique_id, $cookieData, pwsms_cfg('session_days', 120));
+    pwsms_clear_failures('auth_token_failure');
+    pwsms_log('access_granted', $row->unique_id, $row->contact_info, ['source' => 'cookie_revive']);
+
+    $hook($userId, $row->contact_info);
+    return true;
 }
 
 function pwsms_resolve_user_id($phone) {
