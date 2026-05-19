@@ -55,6 +55,11 @@
 7. For month view: a day is GREEN if zero gaps, YELLOW if any gap, RED if no coverage at all.
 8. Compressed list view: interleave shifts + `Available` rows for each gap, sorted by start_dt.
 
+## Drag / resize
+- Calendar is `editable: true` globally; each event from `api/shifts.php` carries its own `editable` flag set from `cg_canEditShift($shift)`. FullCalendar honors the per-event flag, so non-admin caregivers can only drag their own shifts.
+- `eventDrop` and `eventResize` both POST `action=update` with the unchanged `caregiver_id` and the new start/end. Server enforces `cg_canEditShift` + the `caregiver_id` reassignment guard regardless.
+- On API failure the JS calls `info.revert()` so the calendar visual rolls back.
+
 ## Cross-midnight rendering
 - Stored as one row with `start_dt < end_dt` across the day boundary.
 - FullCalendar v6 natively splits multi-day events across columns in week view.

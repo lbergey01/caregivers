@@ -82,6 +82,12 @@
 - Deep-link wired: `cg/index.php?goto=YYYY-MM-DD&shift=N` navigates the calendar to that date and pops the shift modal once events finish loading.
 - History link added to the calendar header for everyone.
 
+### Drag-to-edit shifts (2026-05-19)
+- Calendar is now `editable: true`, but the API stamps each shift event with `editable: $can_edit`. FullCalendar's per-event flag wins, so caregivers can only drag/resize their own shifts; admins can drag any. Gap background events are non-interactive (FullCalendar's `display:'background'` rule).
+- `eventDrop` and `eventResize` both call `persistEventChange(info)` in `cg/index.php`, which POSTs `action=update` with the existing `caregiver_id` and new MySQL-formatted start/end. On any server error it calls `info.revert()` and alerts.
+- Refetches events after a successful drag so gap blocks + month-cell tints recompute. Brief flash is intentional — visual coverage stays correct.
+- No API changes beyond adding the per-event `editable` flag — `cg_canEditShift` already enforces the permission server-side, and the `caregiver_id` reassignment guard in `shifts.php` blocks any non-admin who tries to move someone else's shift via crafted POST.
+
 ### Notifications (deferred)
 v1 has SMS plumbing + email available but no triggers are wired. Future idea (user): admin alert when a shift edit shortens coverage or creates a gap. Hooks would live in `cg_updateShift` / `cg_deleteShift` after computing pre/post coverage diff.
 

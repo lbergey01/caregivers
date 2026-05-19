@@ -185,7 +185,11 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
     selectMirror: true,
     selectLongPressDelay: 250,
     longPressDelay: 250,
-    editable: false,
+    // Drag/resize is opt-in per-event: the API stamps each shift with `editable: can_edit`,
+    // so caregivers can only drag their own shifts; admins can drag any.
+    editable: true,
+    eventStartEditable: true,
+    eventDurationEditable: true,
     events: function(info, success, fail) {
       fetch(`api/shifts.php?client_id=${currentClient}&from=${info.startStr}&to=${info.endStr}`)
         .then(r => r.json())
@@ -232,7 +236,9 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
         caregiver_id: info.event.extendedProps.caregiver_id,
         can_edit:     info.event.extendedProps.can_edit
       });
-    }
+    },
+    eventDrop:   function(info) { persistEventChange(info, 'Move'); },
+    eventResize: function(info) { persistEventChange(info, 'Resize'); }
   });
   cal.render();
 
@@ -300,6 +306,44 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
     return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   }
   function toMySQL(s) { return s.replace('T', ' ') + ':00'; }
+  function dateToMySQL(d) {
+    const pad = n => n.toString().padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} `
+         + `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+
+  // Persist a drag/resize. Confirms first (drag is easy to trigger by accident),
+  // and on any server error reverts the visual change.
+  function persistEventChange(info, verb) {
+    const ev = info.event;
+    if (!ev.end) { info.revert(); return; }   // safety: FC should always supply end
+    const fmt = d => d.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+    const msg = `${verb} this shift?\n\n`
+              + `From: ${fmt(info.oldEvent.start)} – ${fmt(info.oldEvent.end)}\n`
+              + `To:   ${fmt(ev.start)} – ${fmt(ev.end)}`;
+    if (!confirm(msg)) { info.revert(); return; }
+    const fd = new FormData();
+    fd.append('action', 'update');
+    fd.append('id', ev.id);
+    fd.append('client_id', currentClient);
+    fd.append('caregiver_id', ev.extendedProps.caregiver_id);
+    fd.append('start_dt', dateToMySQL(ev.start));
+    fd.append('end_dt',   dateToMySQL(ev.end));
+    fetch('api/shifts.php', { method: 'POST', body: fd })
+      .then(r => r.json().then(j => ({ok: r.ok, body: j})))
+      .then(({ok, body}) => {
+        if (!ok) throw new Error(body.error || 'Save failed');
+        // Refetch so yellow gap blocks (and month-cell tints) recompute.
+        cal.refetchEvents();
+        if (cal.view.type === 'dayGridMonth') {
+          paintMonthCells(cal.view.currentStart.toISOString(), cal.view.currentEnd.toISOString());
+        }
+      })
+      .catch(err => {
+        info.revert();
+        alert(err.message);
+      });
+  }
 
   function openShiftModal(opts) {
     $('shiftFormErr').classList.add('d-none');

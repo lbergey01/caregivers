@@ -46,6 +46,7 @@ if ($method === 'GET') {
             'end'         => date('c', strtotime($s->end_dt)),
             'backgroundColor' => $s->caregiver_color,
             'borderColor'     => $s->caregiver_color,
+            'editable'    => $can_edit,
             'extendedProps' => [
                 'kind'         => 'shift',
                 'caregiver_id' => (int)$s->caregiver_id,
