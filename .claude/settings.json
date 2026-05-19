@@ -13,7 +13,9 @@
       "Bash(/c/xampp/php/php.exe /c/tmp/cg_gap_test.php)",
       "Bash(/c/xampp/php/php.exe -l /c/xampp/htdocs/caregivers/cg/index.php)",
       "Bash(/c/xampp/php/php.exe -r \"echo 'upload_max_filesize=' . ini_get\\('upload_max_filesize'\\) . ', post_max_size=' . ini_get\\('post_max_size'\\) . ', file_uploads=' . ini_get\\('file_uploads'\\) . PHP_EOL;\")",
-      "Bash(/c/xampp/php/php.exe -l /c/xampp/htdocs/caregivers/cg/api/attachment.php)"
+      "Bash(/c/xampp/php/php.exe -l /c/xampp/htdocs/caregivers/cg/api/attachment.php)",
+      "Bash(/c/xampp/mysql/bin/mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 caregivers -e \"SELECT * FROM cg_shifts LIMIT 10; SELECT COUNT\\(*\\) FROM cg_caregivers; SELECT * FROM cg_caregivers LIMIT 10;\")",
+      "Bash(/c/xampp/php/php.exe /c/xampp/htdocs/caregivers/_cg_window_test.php)"
     ],
     "additionalDirectories": [
       "C:\\xampp\\htdocs\\caregivers\\.claude"

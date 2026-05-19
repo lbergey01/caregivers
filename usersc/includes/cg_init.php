@@ -171,16 +171,38 @@ function cg_deleteNote($id) {
     $db->query('DELETE FROM cg_shift_notes       WHERE id      = ?', [$id]);
 }
 
-// Authors can edit their own; admins can edit/delete anyone's.
+// Author-edit window: the note's shift is current-ish, OR the note was just posted.
+// Tweak the buffers here if caregivers complain about the window being too tight.
+if (!defined('CG_NOTE_SHIFT_BUFFER_SEC')) define('CG_NOTE_SHIFT_BUFFER_SEC', 3600);    // 1 hour pre/post-shift
+if (!defined('CG_NOTE_RECENT_GRACE_SEC')) define('CG_NOTE_RECENT_GRACE_SEC', 4 * 3600); // 4 hours after posting
+
+function cg_noteEditWindowOpen($note) {
+    if (!$note) return false;
+    $now = time();
+    if (($now - strtotime($note->created_at)) <= CG_NOTE_RECENT_GRACE_SEC) return true;
+    $shift = cg_getShift($note->shift_id);
+    if (!$shift) return false;
+    $start = strtotime($shift->start_dt) - CG_NOTE_SHIFT_BUFFER_SEC;
+    $end   = strtotime($shift->end_dt)   + CG_NOTE_SHIFT_BUFFER_SEC;
+    return $now >= $start && $now <= $end;
+}
+
+// Authors can edit/delete their own while the window is open. Admins always.
 function cg_canEditNote($note) {
+    if (!$note) return false;
     if (cg_isAdmin()) return true;
     global $user;
-    if (!$user->isLoggedIn()) return false;
-    return (int)$note->author_user_id === (int)$user->data()->id;
+    if (!$user || !$user->isLoggedIn()) return false;
+    if ((int)$note->author_user_id !== (int)$user->data()->id) return false;
+    return cg_noteEditWindowOpen($note);
 }
 function cg_canDeleteNote($note) {
     if (!$note) return false;
-    return cg_isAdmin();
+    if (cg_isAdmin()) return true;
+    global $user;
+    if (!$user || !$user->isLoggedIn()) return false;
+    if ((int)$note->author_user_id !== (int)$user->data()->id) return false;
+    return cg_noteEditWindowOpen($note);
 }
 
 /* ---------- gap math ----------

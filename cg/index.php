@@ -64,6 +64,7 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
       <?php if ($is_admin || $me_cg): ?>
         <button id="btnAddShift" class="btn btn-sm btn-primary">+ Add Shift</button>
       <?php endif; ?>
+      <a class="btn btn-sm btn-outline-secondary" href="history.php">History</a>
       <?php if ($is_admin): ?>
         <a class="btn btn-sm btn-outline-secondary" href="admin_caregivers.php">Caregivers</a>
         <a class="btn btn-sm btn-outline-secondary" href="admin_clients.php">Clients</a>
@@ -229,12 +230,34 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
         start:        info.event.start,
         end:          info.event.end,
         caregiver_id: info.event.extendedProps.caregiver_id,
-        notes:        info.event.extendedProps.notes || '',
         can_edit:     info.event.extendedProps.can_edit
       });
     }
   });
   cal.render();
+
+  // Deep-link from history: index.php?goto=YYYY-MM-DD&shift=N
+  (function deepLink() {
+    const p = new URLSearchParams(window.location.search);
+    const goto = p.get('goto'), shiftId = p.get('shift');
+    if (!goto && !shiftId) return;
+    if (goto) cal.gotoDate(goto);
+    if (!shiftId) return;
+    let opened = false;
+    cal.on('eventsSet', () => {
+      if (opened) return;
+      const ev = cal.getEventById(shiftId);
+      if (!ev) return;
+      opened = true;
+      openShiftModal({
+        id:           ev.id,
+        start:        ev.start,
+        end:          ev.end,
+        caregiver_id: ev.extendedProps.caregiver_id,
+        can_edit:     ev.extendedProps.can_edit
+      });
+    });
+  })();
 
   // "+ Add Shift" button — opens modal with sensible defaults.
   document.getElementById('btnAddShift')?.addEventListener('click', function() {
@@ -283,7 +306,6 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
     $('f_id').value = opts.id || '';
     $('f_start').value = toLocalInput(opts.start);
     $('f_end').value   = toLocalInput(opts.end);
-    $('f_notes').value = opts.notes || '';
     if (opts.caregiver_id) {
       $('f_caregiver').value = opts.caregiver_id;
     } else if (ME_CG_ID && !IS_ADMIN) {
@@ -304,7 +326,6 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
   }
 
   /* ---------- Notes timeline + composer ---------- */
-  const IS_ADMIN_FLAG = IS_ADMIN;
   let notesShiftId = null;
   let notesCanWrite = false;
   let pendingFiles = [];   // files queued in the composer for the next "Post note"

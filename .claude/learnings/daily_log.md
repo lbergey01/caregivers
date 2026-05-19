@@ -47,6 +47,41 @@
 - No face detection (per user — caregiver photos are evidence/log photos, not ID shots).
 - The threshold is a single constant (`BLUR_THRESHOLD = 100`) at the top of the blur block in `cg/index.php`. Bump it up if too many sharp photos get flagged, down if blurry ones slip through. Variance for each photo is logged to the console for easy tuning.
 
+### Time-stamped notes + per-note attachments (2026-05-18 follow-up 4)
+- **Schema change**: `cg_shifts.notes` column dropped. New table `cg_shift_notes` (id, shift_id, body, author_user_id, author_caregiver_id, created_at, edited_at, edited_by). `cg_shift_attachments` got a nullable `note_id` so attachments live under notes now.
+- **Permissions**: author can edit their own notes; admin can edit/delete anyone's. `cg_canEditNote`/`cg_canDeleteNote` in `cg_init.php`. Attachments inherit the parent note's edit policy.
+- **Cascade delete**: deleting a shift removes its notes, attachments, and on-disk files. Deleting a note removes its attached files. Implemented in `cg_deleteShift` / `cg_deleteNote`.
+- **API**: new `cg/api/notes.php` (list/create/update/delete). `cg/api/attachment.php` now accepts `note_id` on upload and uses the note's permission if present.
+- **Modal UI**: removed the single-textarea notes field. After a shift exists, a vertical timeline of notes appears (oldest at top, each with author • timestamp • "edited at X" badge if modified). Below is a composer with:
+  - Body textarea
+  - **📷 Photo** button → triggers hidden image-only `<input capture="environment">` → runs blur check → adds to a pending strip
+  - **📎 Attachment** button → triggers hidden `image/* + pdf + txt` input → adds to pending strip (no blur check; allows gallery + docs)
+  - Pending strip shows thumbnails with X to remove before posting
+  - Post note → creates the note row → uploads each pending file with `note_id` set → refreshes timeline
+- **Author tracking**: every note row stores both the UserSpice user_id (for editor-permission checks) and the linked caregiver record (so the displayed name is the caregiver's name as shown on the schedule; survives if the caregiver's user link changes later).
+- **Empty-body notes** allowed (set to `(attachment)` placeholder) when only files are posted, so timestamp + author still have meaning.
+
+### Edit-window + history feed (2026-05-19)
+
+**Time-gated edit window** (caregivers can no longer rewrite history)
+- `cg_noteEditWindowOpen($note)` returns true if:
+  - The note was created within `CG_NOTE_RECENT_GRACE_SEC` (default 4 h) — typo grace, OR
+  - The note's shift is "current-ish" — `[shift.start_dt - CG_NOTE_SHIFT_BUFFER_SEC, shift.end_dt + CG_NOTE_SHIFT_BUFFER_SEC]` covers now (default 1 h pre/post buffer)
+- `cg_canEditNote` and `cg_canDeleteNote` both now gate on this window for the note's author. Admin still has unrestricted access.
+- Both buffers are tweakable constants near the top of the note helpers section in `cg_init.php`.
+- Verified against the live DB: old note on old shift → closed; just-posted note on old shift → open (grace); note on currently-active shift → open; planning note on future shift → open (grace).
+
+**History feed**
+- New `cg/api/notes.php?action=recent` returns notes across all shifts for a client, joined with shift + caregiver info.
+  - `hours=N` rolling window (default 24). Capped to 24 for non-admin.
+  - Admin may pass `from=…&to=…` MySQL DATETIME for explicit ranges, plus `caregiver_id=N` to filter by the shift's assigned caregiver.
+  - `LIMIT 500` ceiling.
+- New page `cg/history.php` — newest-first list with author chip, shift caregiver chip, timestamp, "edited" badge, attachments thumbnail strip, and a "View shift" link.
+  - Caregivers see only "last 24 hours" with no controls (per requirement).
+  - Admin sees a from/to + caregiver dropdown.
+- Deep-link wired: `cg/index.php?goto=YYYY-MM-DD&shift=N` navigates the calendar to that date and pops the shift modal once events finish loading.
+- History link added to the calendar header for everyone.
+
 ### Notifications (deferred)
 v1 has SMS plumbing + email available but no triggers are wired. Future idea (user): admin alert when a shift edit shortens coverage or creates a gap. Hooks would live in `cg_updateShift` / `cg_deleteShift` after computing pre/post coverage diff.
 

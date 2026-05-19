@@ -22,6 +22,87 @@ global $db;
 $method = $_SERVER['REQUEST_METHOD'];
 $action = $_REQUEST['action'] ?? '';
 
+if ($method === 'GET' && $action === 'recent') {
+    // Time-windowed feed of notes across all shifts for a client.
+    //   ?hours=N           rolling window, default 24
+    //   ?from=...&to=...   explicit MySQL DATETIME bounds (admin only — caregivers are capped at 24h rolling)
+    //   ?caregiver_id=N    optional filter (by shift's assigned caregiver)
+    $client_id = (int)($_GET['client_id'] ?? cg_defaultClientId());
+    $is_admin  = cg_isAdmin();
+
+    $where  = ['s.client_id = ?'];
+    $params = [$client_id];
+
+    if ($is_admin && !empty($_GET['from']) && !empty($_GET['to'])) {
+        $where[] = 'n.created_at BETWEEN ? AND ?';
+        $params[] = $_GET['from'];
+        $params[] = $_GET['to'];
+    } else {
+        $hours = max(1, (int)($_GET['hours'] ?? 24));
+        if (!$is_admin) $hours = min($hours, 24);   // non-admin cap
+        $since = date('Y-m-d H:i:s', time() - $hours * 3600);
+        $where[] = 'n.created_at >= ?';
+        $params[] = $since;
+    }
+
+    if (!empty($_GET['caregiver_id'])) {
+        $where[] = 's.caregiver_id = ?';
+        $params[] = (int)$_GET['caregiver_id'];
+    }
+
+    $sql = 'SELECT n.*,
+                   s.start_dt   AS shift_start, s.end_dt AS shift_end,
+                   sc.id        AS shift_caregiver_id,
+                   sc.name      AS shift_caregiver_name,
+                   sc.color     AS shift_caregiver_color,
+                   an.name      AS author_name,
+                   u.username   AS author_username
+              FROM cg_shift_notes n
+              JOIN cg_shifts s     ON s.id  = n.shift_id
+              JOIN cg_caregivers sc ON sc.id = s.caregiver_id
+              LEFT JOIN cg_caregivers an ON an.id = n.author_caregiver_id
+              LEFT JOIN users u          ON u.id  = n.author_user_id
+             WHERE ' . implode(' AND ', $where) . '
+             ORDER BY n.created_at DESC, n.id DESC
+             LIMIT 500';
+    $notes = $db->query($sql, $params)->results();
+
+    if (!$notes) { echo '[]'; exit; }
+
+    $ids = array_map(fn($n) => (int)$n->id, $notes);
+    $ph  = implode(',', array_fill(0, count($ids), '?'));
+    $atts = $db->query(
+        "SELECT id, note_id, orig_name, mime, size_bytes
+           FROM cg_shift_attachments
+          WHERE note_id IN ($ph)
+          ORDER BY uploaded_at ASC",
+        $ids
+    )->results();
+    $byNote = [];
+    foreach ($atts as $a) $byNote[(int)$a->note_id][] = $a;
+
+    $out = [];
+    foreach ($notes as $n) {
+        $out[] = [
+            'id'             => (int)$n->id,
+            'shift_id'       => (int)$n->shift_id,
+            'shift_start'    => $n->shift_start,
+            'shift_end'      => $n->shift_end,
+            'shift_caregiver_name'  => $n->shift_caregiver_name,
+            'shift_caregiver_color' => $n->shift_caregiver_color,
+            'body'           => $n->body,
+            'author_name'    => $n->author_name ?: ($n->author_username ?: 'Unknown'),
+            'created_at'     => $n->created_at,
+            'edited_at'      => $n->edited_at,
+            'can_edit'       => cg_canEditNote($n),
+            'can_delete'     => cg_canDeleteNote($n),
+            'attachments'    => $byNote[(int)$n->id] ?? [],
+        ];
+    }
+    echo json_encode($out);
+    exit;
+}
+
 if ($method === 'GET' && $action === 'list') {
     $shift_id = (int)($_GET['shift_id'] ?? 0);
     if (!$shift_id) jerr(400, 'shift_id required.');
