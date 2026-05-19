@@ -41,7 +41,17 @@
       "Bash(mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 caregivers -e \"DESCRIBE users;\")",
       "Bash(mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 caregivers -e \"SELECT id, username, fname, lname, email FROM users WHERE id IN \\(1,2,3,4\\) ORDER BY id;\")",
       "Bash(mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 caregivers -e \"SHOW TABLES LIKE 'page_access'; SHOW TABLES LIKE 'pwsms_%';\")",
-      "Bash(mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 caregivers -e \"SELECT skey, sval FROM cg_settings WHERE skey LIKE 'sms_%';\")"
+      "Bash(mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 caregivers -e \"SELECT skey, sval FROM cg_settings WHERE skey LIKE 'sms_%';\")",
+      "Bash(mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 vbs_tmc -e \"SHOW TABLES LIKE '%setting%'; SHOW TABLES LIKE '%sms%';\")",
+      "Bash(mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 vbs_tmc -e \"DESCRIBE settings;\")",
+      "Bash(mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 vbs_tmc -e \"SHOW COLUMNS FROM settings LIKE 'sms%';\")",
+      "Bash(mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 vbs_tmc -e \"SELECT column_name FROM information_schema.columns WHERE table_schema='vbs_tmc' AND table_name='settings' AND column_name LIKE 'sms%';\")",
+      "Bash(mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 vbs_tmc -e \"SELECT column_name FROM information_schema.columns WHERE table_schema='vbs_tmc' AND column_name LIKE 'sms%';\")",
+      "Bash(mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 -e \"SHOW DATABASES LIKE 'vbs%';\")",
+      "Bash(mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 vbs_tmc -e \"SELECT sms_user_id, sms_pass, sms_did, sms_provider, sms_private_ip, sms_private_port, sms_private_user, sms_private_pass FROM settings LIMIT 1\\\\G\")",
+      "Bash(mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 vbs_tmc -e \"SELECT table_name, column_name FROM information_schema.columns WHERE table_schema='vbs_tmc' AND column_name LIKE 'sms_%';\")",
+      "Bash(mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 vbs_tmc -e \"SELECT sms_provider, sms_user_id, sms_pass, sms_did, sms_private_ip, sms_private_port, sms_private_user, sms_private_pass FROM config\\\\G\")",
+      "Bash(php c:/tmp/seed_run.php)"
     ],
     "additionalDirectories": [
       "C:\\xampp\\htdocs\\caregivers\\.claude"

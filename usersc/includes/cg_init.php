@@ -7,6 +7,12 @@ if (!defined('CG_PERM_CAREGIVER')) {
     define('CG_PERM_ADMIN', 2);
 }
 
+// Idempotent SMS-settings seed. First page-load on a fresh install populates
+// cg_settings; subsequent runs no-op (function uses a static guard + the
+// underlying SQL preserves any non-empty values).
+require_once __DIR__ . '/cg_seed_sms.php';
+cg_seed_sms_settings();
+
 /* ---------- settings ---------- */
 
 function cg_settings() {
