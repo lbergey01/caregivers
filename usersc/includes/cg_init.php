@@ -13,6 +13,13 @@ if (!defined('CG_PERM_CAREGIVER')) {
 require_once __DIR__ . '/cg_seed_sms.php';
 cg_seed_sms_settings();
 
+// Idempotent schema patches. Each file defines one function and a static guard;
+// re-running is a no-op once the column/table/seed is in place.
+require_once dirname(__DIR__, 2) . '/install/patches/2026-05-19_payroll.php';
+cg_patch_2026_05_19_payroll();
+require_once dirname(__DIR__, 2) . '/install/patches/2026-05-19_shift_audit.php';
+cg_patch_2026_05_19_shift_audit();
+
 // Auto-revive UserSpice session from a still-valid pwsms cookie. Skipped when
 // the user is already password-logged-in. Lets a returning caregiver land on
 // any cg/ page without re-doing SMS verification.
@@ -70,6 +77,52 @@ function cg_canEditShift($shift) {
     return (int)$shift->caregiver_id === (int)$me->id;
 }
 
+/* ---------- shift audit log ---------- */
+
+// Snapshot fields written to before/after_json. Keep narrow — only the user-visible scheduling fields.
+function cg_shiftSnapshot($shift) {
+    if (!$shift) return null;
+    return [
+        'client_id'    => (int)$shift->client_id,
+        'caregiver_id' => (int)$shift->caregiver_id,
+        'start_dt'     => $shift->start_dt,
+        'end_dt'       => $shift->end_dt,
+    ];
+}
+
+// Record one row. $action ∈ {insert,update,delete}. $before/$after are arrays (or null) per cg_shiftSnapshot.
+// Actor identity is sniffed from the active UserSpice session + linked caregiver row.
+function cg_logShiftAudit($shift_id, $action, $before, $after) {
+    global $db, $user;
+    $actor_user_id = $actor_cg_id = null;
+    $actor_name = null;
+    if (isset($user) && $user->isLoggedIn()) {
+        $actor_user_id = (int)$user->data()->id;
+        $actor_name    = trim(($user->data()->fname ?? '') . ' ' . ($user->data()->lname ?? ''));
+        if ($actor_name === '') $actor_name = $user->data()->username ?? null;
+        $cg = cg_currentCaregiver();
+        if ($cg) {
+            $actor_cg_id = (int)$cg->id;
+            // Prefer caregiver display name when available — that's what other users see on the calendar.
+            $actor_name  = $cg->name;
+        }
+    }
+    $db->query(
+        'INSERT INTO cg_shift_audit
+           (shift_id, action, actor_user_id, actor_caregiver_id, actor_name, before_json, after_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [
+            $shift_id,
+            $action,
+            $actor_user_id,
+            $actor_cg_id,
+            $actor_name,
+            $before !== null ? json_encode($before) : null,
+            $after  !== null ? json_encode($after)  : null,
+        ]
+    );
+}
+
 /* ---------- shift CRUD ---------- */
 
 function cg_getShifts($client_id, $from_dt, $to_dt) {
@@ -101,7 +154,14 @@ function cg_createShift($client_id, $caregiver_id, $start_dt, $end_dt, $created_
          VALUES (?, ?, ?, ?, ?)',
         [$client_id, $caregiver_id, $start_dt, $end_dt, $created_by]
     );
-    return $db->lastId();
+    $id = $db->lastId();
+    cg_logShiftAudit($id, 'insert', null, [
+        'client_id'    => (int)$client_id,
+        'caregiver_id' => (int)$caregiver_id,
+        'start_dt'     => $start_dt,
+        'end_dt'       => $end_dt,
+    ]);
+    return $id;
 }
 
 function cg_updateShift($id, $caregiver_id, $start_dt, $end_dt) {
@@ -109,14 +169,21 @@ function cg_updateShift($id, $caregiver_id, $start_dt, $end_dt) {
     if (strtotime($end_dt) <= strtotime($start_dt)) {
         throw new Exception('End time must be after start time.');
     }
+    $before = cg_shiftSnapshot(cg_getShift($id));
     $db->query(
         'UPDATE cg_shifts SET caregiver_id = ?, start_dt = ?, end_dt = ? WHERE id = ?',
         [$caregiver_id, $start_dt, $end_dt, $id]
     );
+    $after = cg_shiftSnapshot(cg_getShift($id));
+    // Skip the audit row when nothing actually changed (drag that landed at the same minute).
+    if ($before !== $after) {
+        cg_logShiftAudit($id, 'update', $before, $after);
+    }
 }
 
 function cg_deleteShift($id) {
     global $db;
+    $before = cg_shiftSnapshot(cg_getShift($id));
     // Cascading cleanup: delete attachments on disk + DB rows + notes
     $atts = $db->query('SELECT id, shift_id, filename FROM cg_shift_attachments WHERE shift_id = ?', [$id])->results();
     global $abs_us_root, $us_url_root;
@@ -128,6 +195,7 @@ function cg_deleteShift($id) {
     $db->query('DELETE FROM cg_shift_attachments WHERE shift_id = ?', [$id]);
     $db->query('DELETE FROM cg_shift_notes       WHERE shift_id = ?', [$id]);
     $db->query('DELETE FROM cg_shifts            WHERE id       = ?', [$id]);
+    cg_logShiftAudit($id, 'delete', $before, null);
 }
 
 /* ---------- Note CRUD ---------- */
@@ -295,6 +363,87 @@ function cg_dayCoverageStatus($shifts, $day_start_ts, $day_end_ts) {
     $total_gap = 0;
     foreach ($gaps as $g) $total_gap += $g[1] - $g[0];
     return ($total_gap >= $day_end_ts - $day_start_ts) ? 'empty' : 'partial';
+}
+
+/* ---------- payroll ----------
+ * Splits a shift into per-second buckets {regular, overnight, holiday},
+ * applies the caregiver's base rate + differentials, and returns:
+ *   ['hours' => ['regular'=>..,'overnight'=>..,'holiday'=>..],
+ *    'pay'   => ['regular'=>..,'overnight'=>..,'holiday'=>..],
+ *    'total_hours', 'total_pay', 'rate_known' (bool)]
+ *
+ * Bucket precedence: a holiday hour stays "holiday" even if it falls in the
+ * overnight window. Differential math: effective_rate = base * mult + add,
+ * with mult defaulting to 1.0 and add to 0.
+ *
+ * $holidays is a flat set: ['YYYY-MM-DD' => true, ...]
+ * $ot_start_hour / $ot_end_hour bound the overnight window. If start > end
+ * (e.g. 22..6), the window wraps midnight.
+ */
+
+function cg_payrollComputeShift($shift, $caregiver, $holidays, $ot_start_hour, $ot_end_hour) {
+    $start = strtotime($shift->start_dt);
+    $end   = strtotime($shift->end_dt);
+    if ($end <= $start) {
+        return ['hours'=>['regular'=>0,'overnight'=>0,'holiday'=>0],
+                'pay'  =>['regular'=>0,'overnight'=>0,'holiday'=>0],
+                'total_hours'=>0,'total_pay'=>0,'rate_known'=>($caregiver->pay_rate !== null)];
+    }
+    $sec = ['regular'=>0, 'overnight'=>0, 'holiday'=>0];
+    // Walk minute-by-minute. Cheap (60 ticks/hour) and exact for hour-boundary differentials.
+    for ($t = $start; $t < $end; $t += 60) {
+        $date = date('Y-m-d', $t);
+        $hour = (int)date('G', $t);
+        $is_holiday = !empty($holidays[$date]);
+        $is_overnight = cg_hourInOvernight($hour, $ot_start_hour, $ot_end_hour);
+        if ($is_holiday)         $sec['holiday']++;
+        elseif ($is_overnight)   $sec['overnight']++;
+        else                     $sec['regular']++;
+    }
+    // Convert minutes to hours
+    foreach ($sec as $k => $v) $sec[$k] = $v / 60.0;
+
+    $base = ($caregiver->pay_rate !== null) ? (float)$caregiver->pay_rate : null;
+    $ot_mult  = ($caregiver->diff_ot_mult  !== null) ? (float)$caregiver->diff_ot_mult  : 1.0;
+    $ot_add   = ($caregiver->diff_ot_add   !== null) ? (float)$caregiver->diff_ot_add   : 0.0;
+    $hol_mult = ($caregiver->diff_hol_mult !== null) ? (float)$caregiver->diff_hol_mult : 1.0;
+    $hol_add  = ($caregiver->diff_hol_add  !== null) ? (float)$caregiver->diff_hol_add  : 0.0;
+
+    $pay = ['regular'=>0, 'overnight'=>0, 'holiday'=>0];
+    if ($base !== null) {
+        $pay['regular']   = $sec['regular']   * $base;
+        $pay['overnight'] = $sec['overnight'] * ($base * $ot_mult  + $ot_add);
+        $pay['holiday']   = $sec['holiday']   * ($base * $hol_mult + $hol_add);
+    }
+    return [
+        'hours'       => $sec,
+        'pay'         => $pay,
+        'total_hours' => $sec['regular'] + $sec['overnight'] + $sec['holiday'],
+        'total_pay'   => $pay['regular'] + $pay['overnight'] + $pay['holiday'],
+        'rate_known'  => ($base !== null),
+    ];
+}
+
+function cg_hourInOvernight($hour, $ot_start_hour, $ot_end_hour) {
+    $ot_start_hour = (int)$ot_start_hour;
+    $ot_end_hour   = (int)$ot_end_hour;
+    if ($ot_start_hour === $ot_end_hour) return false; // no overnight window
+    if ($ot_start_hour < $ot_end_hour) {
+        return $hour >= $ot_start_hour && $hour < $ot_end_hour;
+    }
+    // Wraps midnight, e.g. 22..6
+    return $hour >= $ot_start_hour || $hour < $ot_end_hour;
+}
+
+function cg_holidaysInRange($from_date, $to_date) {
+    global $db;
+    $rows = $db->query(
+        'SELECT hdate, name FROM cg_holidays WHERE hdate BETWEEN ? AND ?',
+        [$from_date, $to_date]
+    )->results();
+    $out = [];
+    foreach ($rows as $r) $out[$r->hdate] = $r->name;
+    return $out;
 }
 
 /* ---------- misc ---------- */

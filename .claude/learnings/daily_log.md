@@ -91,6 +91,26 @@
 ### Notifications (deferred)
 v1 has SMS plumbing + email available but no triggers are wired. Future idea (user): admin alert when a shift edit shortens coverage or creates a gap. Hooks would live in `cg_updateShift` / `cg_deleteShift` after computing pre/post coverage diff.
 
+### Payroll report (2026-05-19)
+- Schema patch lives at `install/patches/2026-05-19_payroll.php` and auto-runs on first include from `usersc/includes/cg_init.php`. Idempotent (column-presence + tableExists checks). DB changes go through PHP, not raw SQL files, so other environments self-update on first load.
+- New `cg_caregivers` columns: `payable` (TINYINT default 1), `pay_rate` (DECIMAL nullable), `diff_ot_mult`/`diff_ot_add`, `diff_hol_mult`/`diff_hol_add`. Pay formula: `effective_rate = base * mult + add`. Mult defaults to 1.0, add to 0. Multiplier applies first, then add.
+- New `cg_holidays(hdate PK, name)` table. Hours on holiday dates use the holiday differential (precedence over overnight when they overlap).
+- New `cg_settings` keys: `ot_start_hour` (default 22), `ot_end_hour` (default 6). When start > end, the window wraps midnight.
+- `cg_payrollComputeShift()` in `cg_init.php` walks the shift minute-by-minute (cheap, 60 ticks/hr) and buckets time into regular/overnight/holiday. Caller is responsible for clipping the shift to the requested date range first.
+- `cg/admin_payroll.php` is the admin report: from/to + client filter + include-unpayable toggle, per-caregiver card with shift detail + subtotals, grand total, print-friendly stylesheet.
+- `cg/admin_holidays.php` manages the holiday calendar (admin CRUD).
+- **Quirk caught the hard way**: do NOT name a local variable `$settings` inside any page that includes UserSpice's `users/includes/template/prep.php`. UserSpice's `$settings` is a global object set in `init.php`, and prep.php does `$settings->template = ...` in its template-fallback path. A local array named `$settings` shadows it and prep.php fatals with "Attempt to assign property template on array". Use a different name (e.g. `$cg_s`) for app-local settings dicts.
+
+### Admin hub + shift audit log (2026-05-19)
+- Calendar header collapsed: the 5 admin buttons (Caregivers/Clients/Payroll/Holidays/Settings) are replaced by a single `Admin` button that opens `cg/admin.php` — a card-grid hub with stats per section.
+- Admin pages now navigate back via `← Admin` instead of listing every sibling — keeps the breadcrumb consistent and scales as new admin pages are added.
+- New table `cg_shift_audit` (id, shift_id, action ENUM(insert/update/delete), actor_user_id, actor_caregiver_id, actor_name snapshot, before_json, after_json, created_at). Patch in `install/patches/2026-05-19_shift_audit.php`, auto-included.
+- Audit logging is centralized in `cg_logShiftAudit($shift_id, $action, $before, $after)` in `cg_init.php`. Hooked directly into `cg_createShift` / `cg_updateShift` / `cg_deleteShift`, so every code path that calls those helpers (API, admin pages, drag/drop) is covered without per-call boilerplate.
+- `cg_shiftSnapshot($shift)` produces the snapshot dict written into JSON (`client_id`, `caregiver_id`, `start_dt`, `end_dt`). Narrow on purpose — notes/attachments are not scheduling fields.
+- Actor name is captured at write time (preferring the linked caregiver display name) so the log stays readable after a user/caregiver record is renamed.
+- Update audits skip the row when before === after — drags that land at the same minute don't pollute the log.
+- `cg/admin_audit.php`: from/to + action + caregiver + shift-id filters, badge-colored action verbs, deep-link to the shift's date/modal for non-delete rows, diff summary for updates. Capped to 1000 rows per page; uses JSON_EXTRACT on the snapshot columns for the caregiver filter (works on MariaDB 10.2+/MySQL 5.7+).
+
 ### To use the app
 1. Log in as the UserSpice admin.
 2. Go to `/caregivers/cg/admin_caregivers.php` — add caregivers. Linking a UserSpice user grants them the Caregiver permission automatically.

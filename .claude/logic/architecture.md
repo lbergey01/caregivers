@@ -20,7 +20,13 @@
   - Shifts that cross midnight are stored as a SINGLE row; rendered as two visual blocks (FullCalendar handles this automatically).
 - **cg_settings** — key/value app settings
   - `id`, `skey` VARCHAR(64) UNIQUE, `sval` TEXT
-  - Keys: `sms_provider` (voipms|private), `sms_user_id`, `sms_pass`, `sms_did`, `sms_private_ip`, `sms_private_port`, `sms_private_user`, `sms_private_pass`, `default_client_id`
+  - Keys: `sms_provider` (voipms|private), `sms_user_id`, `sms_pass`, `sms_did`, `sms_private_ip`, `sms_private_port`, `sms_private_user`, `sms_private_pass`, `default_client_id`, `ot_start_hour`, `ot_end_hour`
+- **cg_caregivers (payroll columns, added 2026-05-19)** — `payable` (TINYINT), `pay_rate` (DECIMAL NULL), `diff_ot_mult`, `diff_ot_add`, `diff_hol_mult`, `diff_hol_add`
+- **cg_holidays** — `hdate` DATE PK, `name`
+- **cg_shift_audit** — `id, shift_id, action ENUM(insert/update/delete), actor_user_id, actor_caregiver_id, actor_name, before_json, after_json, created_at`. Every call to `cg_createShift`/`cg_updateShift`/`cg_deleteShift` writes one row via `cg_logShiftAudit`.
+
+## Schema migrations
+- DB schema changes are done via PHP files under `install/patches/`, auto-included from `cg_init.php`. Each patch defines an idempotent `cg_patch_*` function with a static guard. Re-runnable; first page-load on a fresh DB upgrades it. Do NOT apply schema changes by hand on the live DB only — always write the patch.
 
 ## Permission model (UserSpice permissions table = `uc_permissions`)
 - Level 2 = Admin (built-in) — full CRUD on everything

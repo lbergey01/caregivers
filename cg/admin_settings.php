@@ -17,6 +17,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         foreach ($keys as $k) {
             if (isset($_POST[$k])) cg_setting_set($k, trim($_POST[$k]));
         }
+        // Overnight window — clamp to 0..23 so a typo can't disable the differential silently.
+        if (isset($_POST['ot_start_hour'])) {
+            cg_setting_set('ot_start_hour', max(0, min(23, (int)$_POST['ot_start_hour'])));
+        }
+        if (isset($_POST['ot_end_hour'])) {
+            cg_setting_set('ot_end_hour', max(0, min(23, (int)$_POST['ot_end_hour'])));
+        }
         $msg = 'Settings saved.';
     } elseif ($action === 'test_sms') {
         try {
@@ -37,7 +44,7 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
 ?>
 <main class="container my-4">
   <h1>Settings</h1>
-  <p><a href="index.php">&larr; Calendar</a> &middot; <a href="admin_caregivers.php">Caregivers</a> &middot; <a href="admin_clients.php">Clients</a></p>
+  <p><a href="admin.php">&larr; Admin</a> &middot; <a href="index.php">Calendar</a></p>
   <?php if ($msg): ?><div class="alert alert-success"><?= $msg ?></div><?php endif; ?>
   <?php if ($err): ?><div class="alert alert-danger"><?= htmlspecialchars($err) ?></div><?php endif; ?>
 
@@ -55,6 +62,28 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
             </option>
           <?php endforeach; ?>
         </select>
+      </div>
+    </div>
+
+    <div class="card mb-3">
+      <div class="card-header">Payroll &mdash; overnight window</div>
+      <div class="card-body">
+        <p class="small text-muted mb-2">
+          Hours falling inside this window get the per-caregiver overnight differential on the payroll report.
+          Window wraps midnight when the start hour is later than the end hour (e.g. 22 &rarr; 6 covers 10 PM through 6 AM).
+        </p>
+        <div class="row g-2">
+          <div class="col-md-3">
+            <label class="form-label">Start hour (0-23)</label>
+            <input type="number" min="0" max="23" name="ot_start_hour" class="form-control"
+                   value="<?= htmlspecialchars((string)($s['ot_start_hour'] ?? 22)) ?>">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">End hour (0-23)</label>
+            <input type="number" min="0" max="23" name="ot_end_hour" class="form-control"
+                   value="<?= htmlspecialchars((string)($s['ot_end_hour'] ?? 6)) ?>">
+          </div>
+        </div>
       </div>
     </div>
 

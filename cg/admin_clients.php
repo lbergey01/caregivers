@@ -32,7 +32,7 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
 ?>
 <main class="container my-4">
   <h1>Clients</h1>
-  <p><a href="index.php">&larr; Calendar</a> &middot; <a href="admin_caregivers.php">Caregivers</a> &middot; <a href="admin_settings.php">Settings</a></p>
+  <p><a href="admin.php">&larr; Admin</a> &middot; <a href="index.php">Calendar</a></p>
   <?php if ($msg): ?><div class="alert alert-success"><?= htmlspecialchars($msg) ?></div><?php endif; ?>
 
   <div class="card mb-4">

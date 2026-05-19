@@ -37,6 +37,15 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
     border: 1px solid #ccc; background: #fff; border-radius: 3px; cursor: pointer;
   }
 
+  /* Space out adjacent buttons in the FullCalendar header (prev/next group
+     and the month/week/day view-switch group). Default v6 styling glues them
+     together as a connected button group, which is hard to hit on touch. */
+  .fc .fc-button-group { gap: 6px; }
+  .fc .fc-button-group > .fc-button {
+    border-radius: var(--bs-border-radius, 0.375rem) !important;
+    border-left-width: 1px !important;
+  }
+
   /* Mobile tweaks */
   @media (max-width: 768px) {
     .fc .fc-toolbar.fc-header-toolbar { flex-wrap: wrap; gap: 6px; }
@@ -66,9 +75,7 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
       <?php endif; ?>
       <a class="btn btn-sm btn-outline-secondary" href="history.php">History</a>
       <?php if ($is_admin): ?>
-        <a class="btn btn-sm btn-outline-secondary" href="admin_caregivers.php">Caregivers</a>
-        <a class="btn btn-sm btn-outline-secondary" href="admin_clients.php">Clients</a>
-        <a class="btn btn-sm btn-outline-secondary" href="admin_settings.php">Settings</a>
+        <a class="btn btn-sm btn-outline-secondary" href="admin.php">Admin</a>
       <?php endif; ?>
     </div>
   </div>

@@ -54,10 +54,31 @@
       "Bash(php c:/tmp/seed_run.php)",
       "Bash(mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 caregivers -e \"UPDATE cg_settings SET sval='private' WHERE skey='sms_provider' AND sval='voipms'; SELECT skey, sval FROM cg_settings WHERE skey='sms_provider';\")",
       "Bash(php -l c:/xampp/htdocs/caregivers/usersc/includes/cg_init.php)",
-      "Bash(graphify --version)"
+      "Bash(graphify --version)",
+      "Bash(mysql -h 192.168.1.95 -u root -pGotMilk#01 caregivers -e \"DESCRIBE cg_caregivers;\")",
+      "Bash(mysql -h 192.168.1.95 -u root -pGotMilk#01 caregivers -e \"SHOW TABLES LIKE 'cg_%';\")",
+      "Bash(xargs grep *)",
+      "Bash(php -l c:/xampp/htdocs/caregivers/install/patches/2026-05-19_payroll.php)",
+      "Bash(php -l c:/xampp/htdocs/caregivers/cg/admin_caregivers.php)",
+      "Bash(php -l c:/xampp/htdocs/caregivers/cg/admin_settings.php)",
+      "Bash(php -l c:/xampp/htdocs/caregivers/cg/admin_holidays.php)",
+      "Bash(php -l c:/xampp/htdocs/caregivers/cg/admin_payroll.php)",
+      "Bash(curl -s -o /dev/null -w \"admin_caregivers: %{http_code}\\\\n\" \"http://localhost/caregivers/cg/admin_caregivers.php\")",
+      "Bash(curl -s -o /dev/null -w \"admin_holidays:   %{http_code}\\\\n\" \"http://localhost/caregivers/cg/admin_holidays.php\")",
+      "Bash(curl -s -o /dev/null -w \"admin_payroll:    %{http_code}\\\\n\" \"http://localhost/caregivers/cg/admin_payroll.php\")",
+      "Bash(curl -s -o /dev/null -w \"admin_settings:   %{http_code}\\\\n\" \"http://localhost/caregivers/cg/admin_settings.php\")",
+      "Bash(curl -s -o /dev/null -w \"calendar:         %{http_code}\\\\n\" \"http://localhost/caregivers/cg/index.php\")",
+      "Read(//c/xampp/apache/logs/**)",
+      "Bash(curl -s -o /dev/null -w \"admin_payroll: %{http_code}\\\\n\" \"http://localhost/caregivers/cg/admin_payroll.php\")",
+      "Bash(php -l c:/xampp/htdocs/caregivers/install/patches/2026-05-19_shift_audit.php)",
+      "Bash(php -l c:/xampp/htdocs/caregivers/cg/admin.php)",
+      "Bash(php -l c:/xampp/htdocs/caregivers/cg/admin_audit.php)",
+      "Bash(mysql -h 192.168.1.95 -u root -pGotMilk#01 caregivers -e \"SHOW CREATE TABLE cg_shift_audit\\\\G\")",
+      "Bash(curl -s -o /dev/null -w \"calendar: %{http_code}\\\\n\" \"http://localhost/caregivers/cg/index.php\")"
     ],
     "additionalDirectories": [
-      "C:\\xampp\\htdocs\\caregivers\\.claude"
+      "C:\\xampp\\htdocs\\caregivers\\.claude",
+      "c:\\xampp\\htdocs\\caregivers\\install"
     ]
   }
 }
