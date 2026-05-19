@@ -24,7 +24,24 @@
       "Bash(php -l c:/xampp/htdocs/caregivers/usersc/includes/pwsms_auth.php)",
       "Bash(php -l c:/xampp/htdocs/caregivers/usersc/includes/pwsms_config.php)",
       "Bash(php -l c:/xampp/htdocs/caregivers/usersc/includes/pwsms_acl.php)",
-      "Bash(php -l c:/xampp/htdocs/caregivers/usersc/includes/pwsms_error_pages.php)"
+      "Bash(php -l c:/xampp/htdocs/caregivers/usersc/includes/pwsms_error_pages.php)",
+      "Bash(php c:/tmp/pwsms_smoke.php)",
+      "Bash(git -C c:/xampp/htdocs/caregivers status --short)",
+      "Bash(git -C c:/xampp/htdocs/caregivers log --oneline -5)",
+      "Bash(git -C c:/xampp/htdocs/caregivers log --name-status -1 HEAD)",
+      "Bash(git -C c:/xampp/htdocs/caregivers log --all --name-only --pretty=format:)",
+      "Bash(git -C c:/xampp/htdocs/caregivers status)",
+      "Bash(git -C c:/xampp/htdocs/caregivers log --oneline origin/main..HEAD)",
+      "Bash(git -C c:/xampp/htdocs/caregivers ls-files --error-unmatch usersc/includes/pwsms_install.php)",
+      "Bash(git -C c:/xampp/htdocs/caregivers log --oneline -- usersc/includes/pwsms_install.php)",
+      "Bash(git -C c:/xampp/htdocs/caregivers diff --stat usersc/includes/pwsms_install.php)",
+      "Bash(git -C c:/xampp/htdocs/caregivers config core.autocrlf)",
+      "Bash(mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 caregivers -e \"SELECT id, name, phone, user_id, active FROM cg_caregivers ORDER BY id;\")",
+      "Bash(mysql.exe -h 192.168.1.95 -u root '-pGotMilk#01' caregivers -e ' *)",
+      "Bash(mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 caregivers -e \"DESCRIBE users;\")",
+      "Bash(mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 caregivers -e \"SELECT id, username, fname, lname, email FROM users WHERE id IN \\(1,2,3,4\\) ORDER BY id;\")",
+      "Bash(mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 caregivers -e \"SHOW TABLES LIKE 'page_access'; SHOW TABLES LIKE 'pwsms_%';\")",
+      "Bash(mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 caregivers -e \"SELECT skey, sval FROM cg_settings WHERE skey LIKE 'sms_%';\")"
     ],
     "additionalDirectories": [
       "C:\\xampp\\htdocs\\caregivers\\.claude"

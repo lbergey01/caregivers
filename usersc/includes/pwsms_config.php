@@ -37,11 +37,17 @@ function pwsms_config() {
 
         // Given a normalized 10-digit phone, return a user_id (int) or null.
         // Receives the digits-only phone (no formatting, no leading 1).
+        //
+        // Strips non-digits from the DB column on the fly so any storage format
+        // matches: "5555551234", "555-555-1234", "(555) 555-1234", "+1 555-555-1234".
+        // Also accepts DB rows that include a leading 1 country code.
         'phone_lookup' => function ($phone) {
             global $db;
             $row = $db->query(
-                "SELECT user_id FROM cg_caregivers WHERE phone = ? AND active = 1",
-                [$phone]
+                "SELECT user_id FROM cg_caregivers
+                 WHERE REGEXP_REPLACE(phone, '[^0-9]', '') IN (?, ?)
+                   AND active = 1",
+                [$phone, '1' . $phone]
             )->first();
             return $row && $row->user_id ? (int)$row->user_id : null;
         },
