@@ -39,9 +39,12 @@ if ($method === 'GET') {
     $events = [];
     foreach ($shifts as $s) {
         $can_edit = $is_admin || ($me_cg && (int)$s->caregiver_id === (int)$me_cg->id);
+        $note_count = (int)($s->note_count ?? 0);
+        // Trailing asterisk marks shifts that have notes — easy to scan, no icon font needed.
+        $title = $s->caregiver_name . ($note_count > 0 ? ' *' : '');
         $events[] = [
             'id'          => (int)$s->id,
-            'title'       => $s->caregiver_name,
+            'title'       => $title,
             'start'       => date('c', strtotime($s->start_dt)),
             'end'         => date('c', strtotime($s->end_dt)),
             'backgroundColor' => $s->caregiver_color,
@@ -51,6 +54,7 @@ if ($method === 'GET') {
                 'kind'         => 'shift',
                 'caregiver_id' => (int)$s->caregiver_id,
                 'can_edit'     => $can_edit,
+                'note_count'   => $note_count,
             ],
         ];
     }

@@ -190,8 +190,11 @@ function cg_logCaregiverAudit($caregiver_id, $action, $before, $after) {
 
 function cg_getShifts($client_id, $from_dt, $to_dt) {
     global $db;
+    // note_count surfaced as an asterisk on the calendar event so admins can
+    // see at-a-glance which shifts have written notes attached.
     return $db->query(
-        'SELECT s.*, c.name AS caregiver_name, c.color AS caregiver_color
+        'SELECT s.*, c.name AS caregiver_name, c.color AS caregiver_color,
+                (SELECT COUNT(*) FROM cg_shift_notes n WHERE n.shift_id = s.id) AS note_count
          FROM cg_shifts s
          JOIN cg_caregivers c ON c.id = s.caregiver_id
          WHERE s.client_id = ?
@@ -396,11 +399,12 @@ function cg_dayList($shifts, $day_start_ts, $day_end_ts) {
         $a = max($day_start_ts, strtotime($s->start_dt));
         $b = min($day_end_ts,   strtotime($s->end_dt));
         if ($b > $a) {
+            $note_count = (int)($s->note_count ?? 0);
             $rows[] = [
                 'kind'     => 'shift',
                 'start_ts' => $a,
                 'end_ts'   => $b,
-                'label'    => $s->caregiver_name,
+                'label'    => $s->caregiver_name . ($note_count > 0 ? ' *' : ''),
                 'color'    => $s->caregiver_color,
                 'shift_id' => $s->id,
             ];

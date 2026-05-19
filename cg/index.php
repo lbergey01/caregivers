@@ -47,6 +47,35 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
     border-left-width: 1px !important;
   }
 
+  /* Calendar with dedicated swipe lanes on either side. Lanes are real DOM
+     elements (not just CSS hints) so they accept taps as well as swipes. */
+  .cg-cal-wrap { display: flex; align-items: stretch; gap: 0; }
+  .cg-cal-center { flex: 1 1 auto; min-width: 0; }
+  .cg-swipe-lane {
+    display: none;             /* hidden by default; toggled per view below */
+    flex: 0 0 56px;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.03);
+    border: 1px solid rgba(0,0,0,0.08);
+    color: #666;
+    cursor: pointer;
+    border-radius: 6px;
+    margin: 0 4px;
+    touch-action: pan-y;       /* lets vertical scroll through; horizontal stays for the tap */
+  }
+  .cg-swipe-lane:hover  { background: rgba(0,0,0,0.06); color: #333; }
+  .cg-swipe-lane:active { background: rgba(0,0,0,0.10); }
+
+  /* Lanes visible in day view; in week we still allow page-level swipe but
+     don't need the lanes since each day already has its own column header.
+     Toggled via .cg-day-view on the wrapper from datesSet. */
+  .cg-cal-wrap.cg-day-view .cg-swipe-lane { display: flex; }
+
+  @media (max-width: 768px) {
+    .cg-cal-wrap.cg-day-view .cg-swipe-lane { flex-basis: 44px; }
+  }
+
   /* Mobile tweaks */
   @media (max-width: 768px) {
     .fc .fc-toolbar.fc-header-toolbar { flex-wrap: wrap; gap: 6px; }
@@ -85,7 +114,19 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
     <div class="alert alert-warning">Your account isn't linked to a caregiver record yet, so you can view but not schedule. Ask an admin to link you on the Caregivers page.</div>
   <?php endif; ?>
 
-  <div id="calendar"></div>
+  <div id="calWrap" class="cg-cal-wrap">
+    <button type="button" class="cg-swipe-lane cg-swipe-prev" data-dir="prev" aria-label="Previous">
+      <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M11.354 1.646a.5.5 0 0 1 0 .708L5.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0"/>
+      </svg>
+    </button>
+    <div id="calendar" class="cg-cal-center"></div>
+    <button type="button" class="cg-swipe-lane cg-swipe-next" data-dir="next" aria-label="Next">
+      <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708"/>
+      </svg>
+    </button>
+  </div>
 </main>
 
 <!-- Add / Edit Shift modal -->
@@ -218,6 +259,9 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
       if (info.view.type === 'timeGridWeek') {
         installDayToggles();
       }
+      // Show the dedicated tap-to-navigate lanes only in day view.
+      document.getElementById('calWrap')
+        .classList.toggle('cg-day-view', info.view.type === 'timeGridDay');
     },
     // Drag-to-select (desktop) creates an exact-range shift.
     select: function(info) {
@@ -251,6 +295,46 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
     eventResize: function(info) { persistEventChange(info, 'Resize'); }
   });
   cal.render();
+
+  // Swipe left/right anywhere on the calendar to navigate prev/next in the
+  // current view. Listens on the wrapper (which includes the side lanes AND
+  // the calendar body — including over event blocks). FullCalendar's own
+  // drag/resize uses a long-press threshold (250 ms), so quick swipes don't
+  // conflict with it.
+  (function attachSwipe() {
+    const wrap = document.getElementById('calWrap');
+    if (!wrap) return;
+    let sx = 0, sy = 0, st = 0, tracking = false;
+    const MIN_DX   = 40;
+    const MAX_DY   = 70;
+    const MAX_TIME = 800;
+
+    wrap.addEventListener('touchstart', e => {
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0];
+      sx = t.clientX; sy = t.clientY; st = Date.now();
+      tracking = true;
+    }, { passive: true });
+
+    wrap.addEventListener('touchend', e => {
+      if (!tracking) return;
+      tracking = false;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - sx;
+      const dy = t.clientY - sy;
+      if (Date.now() - st > MAX_TIME) return;
+      if (Math.abs(dx) < MIN_DX) return;
+      if (Math.abs(dy) > MAX_DY) return;
+      if (dx < 0) cal.next(); else cal.prev();
+    }, { passive: true });
+
+    // Tap on a side lane is the primary, discoverable nav affordance.
+    wrap.querySelectorAll('.cg-swipe-lane').forEach(lane => {
+      lane.addEventListener('click', () => {
+        if (lane.dataset.dir === 'next') cal.next(); else cal.prev();
+      });
+    });
+  })();
 
   // Deep-link from history: index.php?goto=YYYY-MM-DD&shift=N
   (function deepLink() {
