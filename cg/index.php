@@ -1,0 +1,777 @@
+<?php
+require_once '../users/init.php';
+require_once $abs_us_root . $us_url_root . 'usersc/includes/cg_init.php';
+
+if (!$user->isLoggedIn()) { Redirect::to($us_url_root . 'users/login.php'); die(); }
+
+$is_admin    = cg_isAdmin();
+$is_cg       = cg_isCaregiver();
+$me_cg       = cg_currentCaregiver();
+$caregivers  = cg_caregiversAll(true);
+$clients     = cg_clientsAll(true);
+$default_cid = cg_defaultClientId();
+
+require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
+?>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.css">
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.js"></script>
+
+<style>
+  /* Month-cell coverage tint */
+  .fc .day-cover-full     { background: rgba(46, 204, 113, 0.18); }
+  .fc .day-cover-partial  { background: rgba(241, 196, 15, 0.18); }
+  .fc .day-cover-empty    { background: rgba(231, 76, 60, 0.20); }
+
+  /* Gap bg-event label */
+  .fc-bg-event.gap-bg::after { content: 'GAP'; font-size: 10px; color: #7f6000; font-weight: 700; }
+
+  /* Compressed list view */
+  .cg-compressed { font-size: 13px; padding: 4px; }
+  .cg-compressed .row-shift,
+  .cg-compressed .row-gap { padding: 4px 6px; margin: 2px 0; border-radius: 4px; }
+  .cg-compressed .row-gap   { background: #f6e58d; color: #7f6000; font-weight: 600; }
+  .cg-compressed .row-shift { color: #fff; }
+
+  .day-toggle-btn {
+    font-size: 11px; padding: 2px 6px; margin-left: 6px;
+    border: 1px solid #ccc; background: #fff; border-radius: 3px; cursor: pointer;
+  }
+
+  /* Mobile tweaks */
+  @media (max-width: 768px) {
+    .fc .fc-toolbar.fc-header-toolbar { flex-wrap: wrap; gap: 6px; }
+    .fc .fc-toolbar-title { font-size: 1.1em; }
+    .fc-button { padding: 6px 10px !important; }
+    /* Bigger hit target on time grid cells so single-tap works reliably */
+    .fc-timegrid-slot { height: 2.2em !important; }
+    .day-toggle-btn { font-size: 13px; padding: 6px 10px; }
+  }
+</style>
+
+<main class="container-fluid my-3">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">Care Schedule</h1>
+    <div>
+      <?php if (count($clients) > 1): ?>
+        <select id="clientPicker" class="form-select form-select-sm d-inline-block w-auto">
+          <?php foreach ($clients as $c): ?>
+            <option value="<?= $c->id ?>" <?= (int)$c->id === $default_cid ? 'selected' : '' ?>>
+              <?= htmlspecialchars($c->name) ?>
+            </option>
+          <?php endforeach; ?>
+        </select>
+      <?php endif; ?>
+      <?php if ($is_admin || $me_cg): ?>
+        <button id="btnAddShift" class="btn btn-sm btn-primary">+ Add Shift</button>
+      <?php endif; ?>
+      <?php if ($is_admin): ?>
+        <a class="btn btn-sm btn-outline-secondary" href="admin_caregivers.php">Caregivers</a>
+        <a class="btn btn-sm btn-outline-secondary" href="admin_clients.php">Clients</a>
+        <a class="btn btn-sm btn-outline-secondary" href="admin_settings.php">Settings</a>
+      <?php endif; ?>
+    </div>
+  </div>
+
+  <?php if (!$is_admin && !$me_cg): ?>
+    <div class="alert alert-warning">Your account isn't linked to a caregiver record yet, so you can view but not schedule. Ask an admin to link you on the Caregivers page.</div>
+  <?php endif; ?>
+
+  <div id="calendar"></div>
+</main>
+
+<!-- Add / Edit Shift modal -->
+<div class="modal fade" id="shiftModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="shiftForm">
+        <div class="modal-header">
+          <h5 class="modal-title" id="shiftModalTitle">Add Shift</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" name="id" id="f_id">
+          <div class="mb-2">
+            <label class="form-label">Caregiver</label>
+            <select name="caregiver_id" id="f_caregiver" class="form-select" required>
+              <?php foreach ($caregivers as $c): ?>
+                <option value="<?= $c->id ?>" data-color="<?= htmlspecialchars($c->color) ?>"
+                  <?= ($me_cg && (int)$c->id === (int)$me_cg->id) ? 'selected' : '' ?>>
+                  <?= htmlspecialchars($c->name) ?>
+                </option>
+              <?php endforeach; ?>
+            </select>
+            <?php if (!$is_admin && $me_cg): ?>
+              <small class="text-muted">You can only schedule yourself.</small>
+            <?php endif; ?>
+          </div>
+          <div class="row g-2">
+            <div class="col-6">
+              <label class="form-label">Start</label>
+              <input type="datetime-local" name="start_dt" id="f_start" class="form-control" step="60" required>
+            </div>
+            <div class="col-6">
+              <label class="form-label">End</label>
+              <input type="datetime-local" name="end_dt" id="f_end" class="form-control" step="60" required>
+            </div>
+          </div>
+          <div id="notesSection" class="mt-3 d-none">
+            <label class="form-label mb-1">Shift log</label>
+            <div id="notesList" class="mb-3"></div>
+
+            <div id="noteComposer" class="border rounded p-2 bg-light">
+              <textarea id="f_note_body" class="form-control" rows="3"
+                        placeholder="Add a note — meds given, mood, incidents…"></textarea>
+
+              <!-- Hidden file inputs; visible buttons trigger them -->
+              <input type="file" id="f_note_photo" class="d-none"
+                     accept="image/*" capture="environment" multiple>
+              <input type="file" id="f_note_file"  class="d-none"
+                     accept="image/*,application/pdf,text/plain" multiple>
+
+              <div id="notePending" class="d-flex flex-wrap gap-2 mt-2"></div>
+
+              <div class="d-flex gap-2 mt-2">
+                <button type="button" id="btnNotePhoto"   class="btn btn-outline-primary btn-sm">📷 Photo</button>
+                <button type="button" id="btnNoteAttach"  class="btn btn-outline-secondary btn-sm">📎 Attachment</button>
+                <div class="ms-auto">
+                  <button type="button" id="btnNotePost" class="btn btn-primary btn-sm">Post note</button>
+                </div>
+              </div>
+              <div id="noteErr" class="text-danger small mt-1"></div>
+            </div>
+          </div>
+
+          <div id="shiftFormErr" class="alert alert-danger d-none mt-2"></div>
+        </div>
+        <div class="modal-footer justify-content-between">
+          <button type="button" class="btn btn-danger d-none" id="btnDelete">Delete</button>
+          <div>
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-primary">Save</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const IS_ADMIN  = <?= $is_admin ? 'true' : 'false' ?>;
+  const ME_CG_ID  = <?= $me_cg ? (int)$me_cg->id : 'null' ?>;
+  const CLIENT_ID = <?= (int)$default_cid ?>;
+  let currentClient = CLIENT_ID;
+
+  const isNarrow = () => window.matchMedia('(max-width: 768px)').matches;
+
+  const cal = new FullCalendar.Calendar(document.getElementById('calendar'), {
+    initialView: isNarrow() ? 'timeGridDay' : 'timeGridWeek',
+    headerToolbar: {
+      left: 'prev,next today',
+      center: 'title',
+      right: 'dayGridMonth,timeGridWeek,timeGridDay'
+    },
+    // Tap a day name/number header in week or month → drill into that day
+    navLinks: true,
+    navLinkDayClick: 'timeGridDay',
+    height: 'auto',
+    nowIndicator: true,
+    slotMinTime: '00:00:00',
+    slotMaxTime: '24:00:00',
+    allDaySlot: false,
+    slotDuration: isNarrow() ? '01:00:00' : '00:30:00',
+    selectable: (IS_ADMIN || ME_CG_ID !== null),
+    selectMirror: true,
+    selectLongPressDelay: 250,
+    longPressDelay: 250,
+    editable: false,
+    events: function(info, success, fail) {
+      fetch(`api/shifts.php?client_id=${currentClient}&from=${info.startStr}&to=${info.endStr}`)
+        .then(r => r.json())
+        .then(success)
+        .catch(fail);
+    },
+    eventDidMount: function(info) {
+      if (info.event.extendedProps.kind === 'gap') {
+        info.el.classList.add('gap-bg');
+      }
+    },
+    datesSet: function(info) {
+      if (info.view.type === 'dayGridMonth') {
+        paintMonthCells(info.startStr, info.endStr);
+      }
+      if (info.view.type === 'timeGridWeek') {
+        installDayToggles();
+      }
+    },
+    // Drag-to-select (desktop) creates an exact-range shift.
+    select: function(info) {
+      openShiftModal({ start: info.start, end: info.end });
+      cal.unselect();
+    },
+    // Single tap/click:
+    //  - In month view: drill into that day (day view)
+    //  - In week/day view: open Add Shift modal pre-filled with that hour + 1hr default
+    dateClick: function(info) {
+      if (info.view.type === 'dayGridMonth') {
+        cal.changeView('timeGridDay', info.date);
+        return;
+      }
+      if (!IS_ADMIN && ME_CG_ID === null) return;
+      const start = info.date;
+      const end = new Date(start.getTime() + 60 * 60 * 1000);
+      openShiftModal({ start, end });
+    },
+    eventClick: function(info) {
+      if (info.event.extendedProps.kind !== 'shift') return;
+      openShiftModal({
+        id:           info.event.id,
+        start:        info.event.start,
+        end:          info.event.end,
+        caregiver_id: info.event.extendedProps.caregiver_id,
+        notes:        info.event.extendedProps.notes || '',
+        can_edit:     info.event.extendedProps.can_edit
+      });
+    }
+  });
+  cal.render();
+
+  // "+ Add Shift" button — opens modal with sensible defaults.
+  document.getElementById('btnAddShift')?.addEventListener('click', function() {
+    const v = cal.view;
+    let start;
+    if (v.type === 'dayGridMonth') {
+      start = new Date();
+      start.setMinutes(0, 0, 0);
+    } else {
+      // Snap to next hour in the current view's range
+      start = new Date(Math.max(Date.now(), v.currentStart.getTime()));
+      start.setMinutes(0, 0, 0);
+    }
+    const end = new Date(start.getTime() + 60 * 60 * 1000);
+    openShiftModal({ start, end });
+  });
+
+  // Re-layout if user rotates phone or resizes window across the breakpoint
+  let wasNarrow = isNarrow();
+  window.addEventListener('resize', () => {
+    const n = isNarrow();
+    if (n !== wasNarrow) {
+      wasNarrow = n;
+      cal.setOption('slotDuration', n ? '01:00:00' : '00:30:00');
+    }
+  });
+
+  document.getElementById('clientPicker')?.addEventListener('change', function() {
+    currentClient = parseInt(this.value, 10);
+    cal.refetchEvents();
+  });
+
+  /* ---------- Modal ---------- */
+  const modalEl  = document.getElementById('shiftModal');
+  const modal    = new bootstrap.Modal(modalEl);
+  const $        = (id) => document.getElementById(id);
+
+  function toLocalInput(d) {
+    const pad = n => n.toString().padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+  function toMySQL(s) { return s.replace('T', ' ') + ':00'; }
+
+  function openShiftModal(opts) {
+    $('shiftFormErr').classList.add('d-none');
+    $('f_id').value = opts.id || '';
+    $('f_start').value = toLocalInput(opts.start);
+    $('f_end').value   = toLocalInput(opts.end);
+    $('f_notes').value = opts.notes || '';
+    if (opts.caregiver_id) {
+      $('f_caregiver').value = opts.caregiver_id;
+    } else if (ME_CG_ID && !IS_ADMIN) {
+      $('f_caregiver').value = ME_CG_ID;
+    }
+    $('f_caregiver').disabled = !IS_ADMIN && ME_CG_ID !== null;
+
+    const editing = !!opts.id;
+    document.getElementById('shiftModalTitle').textContent = editing ? 'Edit Shift' : 'Add Shift';
+    const canEdit = !editing || opts.can_edit;
+    $('btnDelete').classList.toggle('d-none', !editing || !canEdit);
+    modalEl.querySelector('button[type="submit"]').classList.toggle('d-none', !canEdit);
+
+    // Notes timeline: only shows after the shift exists.
+    setNotesShift(editing ? opts.id : null, canEdit);
+
+    modal.show();
+  }
+
+  /* ---------- Notes timeline + composer ---------- */
+  const IS_ADMIN_FLAG = IS_ADMIN;
+  let notesShiftId = null;
+  let notesCanWrite = false;
+  let pendingFiles = [];   // files queued in the composer for the next "Post note"
+
+  function setNotesShift(shiftId, canWrite) {
+    notesShiftId = shiftId;
+    notesCanWrite = !!canWrite;
+    pendingFiles = [];
+    const sec = document.getElementById('notesSection');
+    if (!shiftId) { sec.classList.add('d-none'); return; }
+    sec.classList.remove('d-none');
+    document.getElementById('f_note_body').value = '';
+    document.getElementById('notePending').innerHTML = '';
+    document.getElementById('noteErr').textContent = '';
+    document.getElementById('noteComposer').style.display = canWrite ? '' : 'none';
+    refreshNotesList();
+  }
+
+  function refreshNotesList() {
+    const list = document.getElementById('notesList');
+    list.innerHTML = '<div class="text-muted small">Loading…</div>';
+    fetch(`api/notes.php?action=list&shift_id=${notesShiftId}`)
+      .then(r => r.json())
+      .then(rows => {
+        list.innerHTML = '';
+        if (!rows.length) {
+          list.innerHTML = '<div class="text-muted small">No notes yet.</div>';
+          return;
+        }
+        rows.forEach(n => list.appendChild(renderNote(n)));
+      })
+      .catch(() => { list.innerHTML = '<div class="text-danger small">Failed to load notes.</div>'; });
+  }
+
+  function fmtTs(dt) {
+    if (!dt) return '';
+    const d = new Date(dt.replace(' ', 'T'));
+    if (isNaN(d.getTime())) return dt;
+    return d.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+  }
+
+  function renderNote(n) {
+    const wrap = document.createElement('div');
+    wrap.className = 'border rounded p-2 mb-2';
+    wrap.dataset.noteId = n.id;
+
+    const head = document.createElement('div');
+    head.className = 'd-flex justify-content-between align-items-start mb-1';
+    head.innerHTML =
+      `<div class="small">
+         <strong>${escapeHtml(n.author_name)}</strong>
+         <span class="text-muted"> · ${escapeHtml(fmtTs(n.created_at))}</span>
+         ${n.edited_at ? `<span class="text-muted fst-italic"> (edited ${escapeHtml(fmtTs(n.edited_at))})</span>` : ''}
+       </div>`;
+    const actions = document.createElement('div');
+    if (n.can_edit) {
+      const eb = document.createElement('button');
+      eb.type = 'button'; eb.className = 'btn btn-link btn-sm p-0 me-2';
+      eb.textContent = 'Edit';
+      eb.addEventListener('click', () => editNoteInline(wrap, n));
+      actions.appendChild(eb);
+    }
+    if (n.can_delete) {
+      const db = document.createElement('button');
+      db.type = 'button'; db.className = 'btn btn-link btn-sm p-0 text-danger';
+      db.textContent = 'Delete';
+      db.addEventListener('click', () => deleteNoteServer(n.id));
+      actions.appendChild(db);
+    }
+    head.appendChild(actions);
+    wrap.appendChild(head);
+
+    const body = document.createElement('div');
+    body.className = 'note-body';
+    body.style.whiteSpace = 'pre-wrap';
+    body.textContent = n.body;
+    wrap.appendChild(body);
+
+    if (n.attachments && n.attachments.length) {
+      const strip = document.createElement('div');
+      strip.className = 'd-flex flex-wrap gap-2 mt-2';
+      n.attachments.forEach(a => strip.appendChild(renderAttachThumb(a, n.can_edit)));
+      wrap.appendChild(strip);
+    }
+    return wrap;
+  }
+
+  function renderAttachThumb(a, canDel) {
+    const isImg = /^image\//.test(a.mime);
+    const wrap = document.createElement('div');
+    wrap.className = 'position-relative';
+    wrap.style.width = '88px';
+    if (isImg) {
+      const img = document.createElement('img');
+      img.src = `api/attachment.php?action=get&id=${a.id}`;
+      img.alt = a.orig_name; img.title = a.orig_name;
+      img.style.cssText = 'width:88px;height:88px;object-fit:cover;border-radius:6px;cursor:pointer;';
+      img.addEventListener('click', () => window.open(img.src, '_blank'));
+      wrap.appendChild(img);
+    } else {
+      const link = document.createElement('a');
+      link.href = `api/attachment.php?action=get&id=${a.id}`;
+      link.target = '_blank';
+      link.className = 'd-flex flex-column align-items-center justify-content-center text-decoration-none';
+      link.style.cssText = 'width:88px;height:88px;border:1px solid #ccc;border-radius:6px;background:#f8f9fa;padding:4px;';
+      link.innerHTML = '<div style="font-size:24px;">📎</div>'
+                     + `<div class="small text-truncate" style="max-width:80px;">${escapeHtml(a.orig_name)}</div>`;
+      wrap.appendChild(link);
+    }
+    if (canDel) {
+      const x = document.createElement('button');
+      x.type = 'button'; x.className = 'btn-close';
+      x.setAttribute('aria-label', 'Delete attachment');
+      x.style.cssText = 'position:absolute;top:2px;right:2px;background-color:#fff;border-radius:50%;opacity:0.85;';
+      x.addEventListener('click', () => deleteAttach(a.id));
+      wrap.appendChild(x);
+    }
+    return wrap;
+  }
+
+  function deleteAttach(id) {
+    if (!confirm('Delete this attachment?')) return;
+    const fd = new FormData();
+    fd.append('action', 'delete'); fd.append('id', id);
+    fetch('api/attachment.php', { method: 'POST', body: fd })
+      .then(r => r.json().then(j => ({ok: r.ok, body: j})))
+      .then(({ok, body}) => {
+        if (!ok) throw new Error(body.error || 'Delete failed');
+        refreshNotesList();
+      })
+      .catch(err => alert(err.message));
+  }
+
+  function editNoteInline(wrapEl, note) {
+    const body = wrapEl.querySelector('.note-body');
+    const original = note.body;
+    const ta = document.createElement('textarea');
+    ta.className = 'form-control mb-1';
+    ta.rows = 4;
+    ta.value = original;
+    body.replaceWith(ta);
+    const btnRow = document.createElement('div');
+    btnRow.className = 'd-flex gap-2';
+    btnRow.innerHTML =
+      `<button type="button" class="btn btn-sm btn-primary">Save</button>
+       <button type="button" class="btn btn-sm btn-secondary">Cancel</button>`;
+    wrapEl.appendChild(btnRow);
+    btnRow.querySelector('.btn-primary').addEventListener('click', () => {
+      const fd = new FormData();
+      fd.append('action', 'update'); fd.append('id', note.id); fd.append('body', ta.value);
+      fetch('api/notes.php', { method: 'POST', body: fd })
+        .then(r => r.json().then(j => ({ok: r.ok, body: j})))
+        .then(({ok, body}) => {
+          if (!ok) throw new Error(body.error || 'Save failed');
+          refreshNotesList();
+        })
+        .catch(err => alert(err.message));
+    });
+    btnRow.querySelector('.btn-secondary').addEventListener('click', refreshNotesList);
+  }
+
+  function deleteNoteServer(id) {
+    if (!confirm('Delete this note and all of its attachments?')) return;
+    const fd = new FormData();
+    fd.append('action', 'delete'); fd.append('id', id);
+    fetch('api/notes.php', { method: 'POST', body: fd })
+      .then(r => r.json().then(j => ({ok: r.ok, body: j})))
+      .then(({ok, body}) => {
+        if (!ok) throw new Error(body.error || 'Delete failed');
+        refreshNotesList();
+      })
+      .catch(err => alert(err.message));
+  }
+
+  /* ---- Composer: two buttons, pending file strip, post ---- */
+
+  document.getElementById('btnNotePhoto').addEventListener('click', () => {
+    document.getElementById('f_note_photo').click();
+  });
+  document.getElementById('btnNoteAttach').addEventListener('click', () => {
+    document.getElementById('f_note_file').click();
+  });
+
+  // Photo path: image-only, blur check
+  document.getElementById('f_note_photo').addEventListener('change', async function(e) {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    for (const f of files) {
+      if (!/^image\//.test(f.type)) { addPendingFile(f); continue; }
+      const { variance, blurry } = await detectBlurClient(f);
+      console.log(`[blur] ${f.name}: variance=${variance.toFixed(1)} threshold=${BLUR_THRESHOLD} ${blurry ? 'BLURRY' : 'ok'}`);
+      if (blurry) {
+        const ok = confirm(`"${f.name}" looks blurry (sharpness ${variance.toFixed(0)} / ${BLUR_THRESHOLD}).\n\nKeep it, or tap Cancel to retake?`);
+        if (!ok) continue;
+      }
+      addPendingFile(f);
+    }
+  });
+
+  // Attachment path: image+pdf+txt, no blur check
+  document.getElementById('f_note_file').addEventListener('change', function(e) {
+    Array.from(e.target.files || []).forEach(addPendingFile);
+    e.target.value = '';
+  });
+
+  function addPendingFile(f) {
+    pendingFiles.push(f);
+    renderPending();
+  }
+  function removePending(idx) {
+    pendingFiles.splice(idx, 1);
+    renderPending();
+  }
+  function renderPending() {
+    const host = document.getElementById('notePending');
+    host.innerHTML = '';
+    pendingFiles.forEach((f, idx) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'position-relative';
+      wrap.style.width = '70px';
+      const isImg = /^image\//.test(f.type);
+      if (isImg) {
+        const img = document.createElement('img');
+        img.src = URL.createObjectURL(f);
+        img.style.cssText = 'width:70px;height:70px;object-fit:cover;border-radius:6px;';
+        img.onload = () => URL.revokeObjectURL(img.src);
+        wrap.appendChild(img);
+      } else {
+        wrap.innerHTML =
+          `<div style="width:70px;height:70px;border:1px solid #ccc;border-radius:6px;background:#fff;padding:2px;
+                       display:flex;flex-direction:column;align-items:center;justify-content:center;">
+             <div style="font-size:22px;">📎</div>
+             <div class="small text-truncate" style="max-width:64px;">${escapeHtml(f.name)}</div>
+           </div>`;
+      }
+      const x = document.createElement('button');
+      x.type = 'button'; x.className = 'btn-close';
+      x.setAttribute('aria-label', 'Remove');
+      x.style.cssText = 'position:absolute;top:0;right:0;background-color:#fff;border-radius:50%;opacity:0.85;';
+      x.addEventListener('click', () => removePending(idx));
+      wrap.appendChild(x);
+      host.appendChild(wrap);
+    });
+  }
+
+  document.getElementById('btnNotePost').addEventListener('click', async function() {
+    const errEl = document.getElementById('noteErr');
+    errEl.textContent = '';
+    const body = document.getElementById('f_note_body').value.trim();
+    if (!body && !pendingFiles.length) {
+      errEl.textContent = 'Add text or at least one photo/attachment.';
+      return;
+    }
+    this.disabled = true;
+    try {
+      // Empty-body notes get a placeholder so the timestamp still has meaning.
+      const fd = new FormData();
+      fd.append('action', 'create');
+      fd.append('shift_id', notesShiftId);
+      fd.append('body', body || '(attachment)');
+      const cr = await fetch('api/notes.php', { method: 'POST', body: fd })
+        .then(r => r.json().then(j => ({ok: r.ok, body: j})));
+      if (!cr.ok) throw new Error(cr.body.error || 'Failed to post note');
+      const noteId = cr.body.id;
+
+      // Upload each pending file in sequence (sequential keeps mobile data sane)
+      for (const f of pendingFiles) {
+        const ufd = new FormData();
+        ufd.append('action', 'upload');
+        ufd.append('note_id', noteId);
+        ufd.append('file', f);
+        const ur = await fetch('api/attachment.php', { method: 'POST', body: ufd })
+          .then(r => r.json().then(j => ({ok: r.ok, body: j})));
+        if (!ur.ok) errEl.textContent = `Some files failed: ${ur.body.error || 'upload error'}`;
+      }
+      document.getElementById('f_note_body').value = '';
+      pendingFiles = [];
+      renderPending();
+      refreshNotesList();
+    } catch (e) {
+      errEl.textContent = e.message;
+    } finally {
+      this.disabled = false;
+    }
+  });
+
+  // ---- Blur detection (pure JS, Laplacian variance) ----
+  // Threshold is in the 0–255 grayscale domain. ~100 is a sensible default;
+  // anything well below is visibly blurry. Tune by watching the console log.
+  const BLUR_THRESHOLD = 100;
+
+  function detectBlurClient(file) {
+    return new Promise(resolve => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        try {
+          const MAX = 800;
+          const r = Math.min(MAX / img.width, MAX / img.height, 1);
+          const w = Math.max(2, Math.round(img.width  * r));
+          const h = Math.max(2, Math.round(img.height * r));
+          const cv = document.createElement('canvas');
+          cv.width = w; cv.height = h;
+          const ctx = cv.getContext('2d');
+          ctx.drawImage(img, 0, 0, w, h);
+          const data = ctx.getImageData(0, 0, w, h).data;
+
+          const gray = new Float32Array(w * h);
+          for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+            gray[j] = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+          }
+          // 3x3 Laplacian: 4*center - 4-neighbors
+          let sum = 0, n = 0;
+          const lap = new Float32Array(w * h);
+          for (let y = 1; y < h - 1; y++) {
+            for (let x = 1; x < w - 1; x++) {
+              const i = y * w + x;
+              const v = 4 * gray[i] - gray[i-1] - gray[i+1] - gray[i-w] - gray[i+w];
+              lap[i] = v;
+              sum += v;
+              n++;
+            }
+          }
+          const mean = sum / n;
+          let sqsum = 0;
+          for (let y = 1; y < h - 1; y++) {
+            for (let x = 1; x < w - 1; x++) {
+              const d = lap[y * w + x] - mean;
+              sqsum += d * d;
+            }
+          }
+          const variance = sqsum / n;
+          URL.revokeObjectURL(url);
+          resolve({ variance, blurry: variance < BLUR_THRESHOLD });
+        } catch (e) {
+          URL.revokeObjectURL(url);
+          resolve({ variance: 0, blurry: false, error: e.message });
+        }
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); resolve({ variance: 0, blurry: false, error: 'load' }); };
+      img.src = url;
+    });
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+  }
+
+  document.getElementById('shiftForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const id = $('f_id').value;
+    const fd = new FormData();
+    fd.append('action', id ? 'update' : 'create');
+    if (id) fd.append('id', id);
+    fd.append('client_id', currentClient);
+    fd.append('caregiver_id', $('f_caregiver').value);
+    fd.append('start_dt', toMySQL($('f_start').value));
+    fd.append('end_dt',   toMySQL($('f_end').value));
+
+    fetch('api/shifts.php', { method: 'POST', body: fd })
+      .then(r => r.json().then(j => ({ok: r.ok, body: j})))
+      .then(({ok, body}) => {
+        if (!ok) throw new Error(body.error || 'Save failed');
+        cal.refetchEvents();
+        if (cal.view.type === 'dayGridMonth') paintMonthCells(cal.view.currentStart.toISOString(), cal.view.currentEnd.toISOString());
+
+        // After a new shift is created, stay in the modal and switch to edit mode
+        // so the user can immediately start posting notes/photos.
+        if (!id && body.id) {
+          $('f_id').value = body.id;
+          document.getElementById('shiftModalTitle').textContent = 'Edit Shift';
+          $('btnDelete').classList.remove('d-none');
+          setNotesShift(body.id, true);
+        } else {
+          modal.hide();
+        }
+      })
+      .catch(err => {
+        const e = document.getElementById('shiftFormErr');
+        e.textContent = err.message; e.classList.remove('d-none');
+      });
+  });
+
+  document.getElementById('btnDelete').addEventListener('click', function() {
+    if (!confirm('Delete this shift?')) return;
+    const fd = new FormData();
+    fd.append('action', 'delete');
+    fd.append('id', $('f_id').value);
+    fetch('api/shifts.php', { method: 'POST', body: fd })
+      .then(r => r.json().then(j => ({ok: r.ok, body: j})))
+      .then(({ok, body}) => {
+        if (!ok) throw new Error(body.error || 'Delete failed');
+        modal.hide();
+        cal.refetchEvents();
+      })
+      .catch(err => {
+        const e = document.getElementById('shiftFormErr');
+        e.textContent = err.message; e.classList.remove('d-none');
+      });
+  });
+
+  /* ---------- Month-cell coverage coloring ---------- */
+  function paintMonthCells(startISO, endISO) {
+    const from = startISO.slice(0, 10);
+    const to   = endISO.slice(0, 10);
+    fetch(`api/coverage.php?client_id=${currentClient}&from=${from}&to=${to}`)
+      .then(r => r.json())
+      .then(map => {
+        document.querySelectorAll('.fc-daygrid-day').forEach(cell => {
+          const d = cell.getAttribute('data-date');
+          cell.classList.remove('day-cover-full','day-cover-partial','day-cover-empty');
+          if (map[d]) cell.classList.add('day-cover-' + map[d]);
+        });
+      });
+  }
+
+  /* ---------- Per-day "compressed" toggle in week view ---------- */
+  function installDayToggles() {
+    document.querySelectorAll('.fc-col-header-cell').forEach(headerCell => {
+      if (headerCell.querySelector('.day-toggle-btn')) return;
+      const dateAttr = headerCell.getAttribute('data-date');
+      if (!dateAttr) return;
+      const btn = document.createElement('button');
+      btn.className = 'day-toggle-btn';
+      btn.textContent = 'list';
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleDayCompressed(dateAttr, btn);
+      });
+      headerCell.querySelector('.fc-col-header-cell-cushion')?.appendChild(btn);
+    });
+  }
+
+  function toggleDayCompressed(date, btn) {
+    const cols = document.querySelectorAll(`.fc-timegrid-col[data-date="${date}"]`);
+    if (!cols.length) return;
+    const col = cols[0];
+    const existing = col.querySelector('.cg-compressed');
+    if (existing) {
+      existing.remove();
+      col.style.position = '';
+      btn.textContent = 'list';
+      return;
+    }
+    fetch(`api/day_list.php?client_id=${currentClient}&date=${date}`)
+      .then(r => r.json())
+      .then(rows => {
+        const div = document.createElement('div');
+        div.className = 'cg-compressed';
+        div.style.position = 'absolute';
+        div.style.inset = '0';
+        div.style.background = '#fff';
+        div.style.zIndex = '5';
+        div.style.overflow = 'auto';
+        rows.forEach(r => {
+          const row = document.createElement('div');
+          row.className = r.kind === 'gap' ? 'row-gap' : 'row-shift';
+          if (r.kind === 'shift') row.style.background = r.color;
+          row.textContent = `${r.label} (${r.start_hm} – ${r.end_hm})`;
+          div.appendChild(row);
+        });
+        col.style.position = 'relative';
+        col.appendChild(div);
+        btn.textContent = 'timeline';
+      });
+  }
+})();
+</script>
+
+<?php require_once $abs_us_root . $us_url_root . 'users/includes/html_footer.php'; ?>

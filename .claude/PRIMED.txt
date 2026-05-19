@@ -1,0 +1,6 @@
+Project: 24/7 Caregiver Scheduling App on UserSpice
+Primed: 2026-05-18
+DB host: 192.168.1.95  user: root  (creds in global CLAUDE.md)
+DB prefix: uc_ (UserSpice core)  cg_ (this app)
+SMS source pattern: c:\xampp\htdocs\vbs\includes\sms_voip_ms.php (VoIP.ms + private fallback)
+Email: UserSpice global email($to,$subject,$body,$opts,$attachment) in users/helpers/helpers.php

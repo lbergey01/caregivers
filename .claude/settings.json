@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/c/xampp/mysql/bin/mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 caregivers -e \"SHOW TABLES LIKE 'cg_%'; SELECT COUNT\\(*\\) AS user_ct FROM uc_users;\")",
+      "Bash(/c/xampp/mysql/bin/mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 caregivers -e \"SHOW TABLES;\")",
+      "Bash(/c/xampp/mysql/bin/mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 caregivers -e \"DESCRIBE users; SELECT id,fname,lname,username,email FROM users LIMIT 5; SELECT * FROM permissions LIMIT 10;\")",
+      "Bash(/c/xampp/mysql/bin/mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 caregivers)",
+      "Bash(/c/xampp/mysql/bin/mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 caregivers -e \"SHOW TABLES LIKE 'cg_%'; SELECT * FROM cg_settings; SELECT * FROM cg_clients; SELECT id,name FROM permissions WHERE name='Caregiver';\")",
+      "Bash(curl -sS -o /tmp/cg_idx.html -w \"idx=%{http_code}\\\\n\" http://localhost/caregivers/cg/index.php)",
+      "Bash(curl -sS -o /tmp/cg_shifts.json -w \"shifts=%{http_code}\\\\n\" \"http://localhost/caregivers/cg/api/shifts.php?from=2026-05-18&to=2026-05-25&client_id=1\")",
+      "Bash(curl -sS -o /tmp/cg_cov.json -w \"cov=%{http_code}\\\\n\" \"http://localhost/caregivers/cg/api/coverage.php?from=2026-05-01&to=2026-06-01&client_id=1\")",
+      "Bash(/c/xampp/mysql/bin/mysql.exe -h 192.168.1.95 -u root '-pGotMilk#01' caregivers -e ' *)",
+      "Bash(/c/xampp/php/php.exe /c/tmp/cg_gap_test.php)",
+      "Bash(/c/xampp/php/php.exe -l /c/xampp/htdocs/caregivers/cg/index.php)",
+      "Bash(/c/xampp/php/php.exe -r \"echo 'upload_max_filesize=' . ini_get\\('upload_max_filesize'\\) . ', post_max_size=' . ini_get\\('post_max_size'\\) . ', file_uploads=' . ini_get\\('file_uploads'\\) . PHP_EOL;\")",
+      "Bash(/c/xampp/php/php.exe -l /c/xampp/htdocs/caregivers/cg/api/attachment.php)"
+    ],
+    "additionalDirectories": [
+      "C:\\xampp\\htdocs\\caregivers\\.claude"
+    ]
+  }
+}
