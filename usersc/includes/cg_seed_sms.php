@@ -46,6 +46,13 @@ function cg_seed_sms_settings() {
             [$k, $v]
         );
     }
+
+    // One-time migration: flip the legacy default 'voipms' to 'private'. Any
+    // other user-chosen value (e.g. admin re-selected 'voipms' from the UI)
+    // is left alone — this only catches the stale install default.
+    $db->query(
+        "UPDATE cg_settings SET sval='private' WHERE skey='sms_provider' AND sval='voipms'"
+    );
 }
 
 }
