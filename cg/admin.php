@@ -12,12 +12,20 @@ $is_admin = cg_isAdmin();
 $cg_count    = (int)$db->query('SELECT COUNT(*) AS n FROM cg_caregivers WHERE active = 1')->first()->n;
 $cl_count    = (int)$db->query('SELECT COUNT(*) AS n FROM cg_clients   WHERE active = 1')->first()->n;
 $hol_count   = (int)$db->query('SELECT COUNT(*) AS n FROM cg_holidays')->first()->n;
+// Count caregivers who have entered any weekly availability rows.
+$av_cg_count = (int)$db->query(
+    'SELECT COUNT(DISTINCT c.id) AS n
+       FROM cg_caregivers c
+       JOIN cg_caregiver_availability a ON a.caregiver_id = c.id
+      WHERE c.active = 1'
+)->first()->n;
 $audit_recent      = (int)$db->query('SELECT COUNT(*) AS n FROM cg_shift_audit     WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)')->first()->n;
 $cg_audit_recent   = (int)$db->query('SELECT COUNT(*) AS n FROM cg_caregiver_audit WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)')->first()->n;
 
 // Each section has an `admin_only` flag. Managers see the rest.
 $sections = [
     ['admin_caregivers.php',     'Caregivers',       "$cg_count active",          'Add or edit caregivers, link logins, set colors.',                false],
+    ['admin_availability_overview.php', 'Availability', "$av_cg_count of $cg_count set", 'Weekly heatmap of who is available — find gaps. Edit each caregiver from Caregivers › 🗓.', false],
     ['admin_pay_rates.php',      'Pay Rates',        '',                          'Per-caregiver rate, payable flag, and overnight/holiday differentials.', true],
     ['admin_clients.php',        'Clients',          "$cl_count active",          'Manage the people receiving care.',                                true],
     ['admin_payroll.php',        'Payroll',          'Run report',                'Hours worked by date range, grouped by caregiver, with $ totals.', true],

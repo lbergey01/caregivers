@@ -104,6 +104,9 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
         <button id="btnAddShift" class="btn btn-sm btn-primary">+ Add Shift</button>
       <?php endif; ?>
       <a class="btn btn-sm btn-outline-secondary" href="history.php">History</a>
+      <?php if ($me_cg && !$is_manager): ?>
+        <a class="btn btn-sm btn-outline-secondary" href="availability.php">My Availability</a>
+      <?php endif; ?>
       <?php if ($is_manager): ?>
         <a class="btn btn-sm btn-outline-secondary" href="admin.php">Admin</a>
       <?php endif; ?>

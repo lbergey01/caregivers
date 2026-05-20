@@ -24,6 +24,8 @@ require_once dirname(__DIR__, 2) . '/install/patches/2026-05-19_manager_and_care
 cg_patch_2026_05_19_manager_and_caregiver_audit();
 require_once dirname(__DIR__, 2) . '/install/patches/2026-05-19_caregiver_notes.php';
 cg_patch_2026_05_19_caregiver_notes();
+require_once dirname(__DIR__, 2) . '/install/patches/2026-05-19_availability.php';
+cg_patch_2026_05_19_availability();
 
 // Auto-revive UserSpice session from a still-valid pwsms cookie. Skipped when
 // the user is already password-logged-in. Lets a returning caregiver land on
@@ -539,4 +541,214 @@ function cg_clientsAll($activeOnly = true) {
     global $db;
     $sql = 'SELECT * FROM cg_clients' . ($activeOnly ? ' WHERE active = 1' : '') . ' ORDER BY name';
     return $db->query($sql)->results();
+}
+
+/* ---------- caregiver availability ----------
+ * Supply-side schedule. cg_caregiver_availability holds the recurring weekly
+ * pattern; cg_caregiver_availability_exception holds date-specific overrides
+ * (vacations, one-off pickups). Anything not covered by a row is `unknown`.
+ *
+ * Permission model: caregivers may edit their own availability; admin and
+ * manager may edit anyone's. Same edit page handles both — controller uses
+ * cg_canEditAvailability() to gate.
+ */
+
+function cg_canEditAvailability($caregiver_id) {
+    if (cg_isManager()) return true;
+    $me = cg_currentCaregiver();
+    return $me && (int)$me->id === (int)$caregiver_id;
+}
+
+function cg_getCaregiverAvailability($caregiver_id) {
+    global $db;
+    return $db->query(
+        'SELECT id, caregiver_id, day_of_week, start_time, end_time, status, notes
+           FROM cg_caregiver_availability
+          WHERE caregiver_id = ?
+          ORDER BY day_of_week, start_time',
+        [(int)$caregiver_id]
+    )->results();
+}
+
+// Replace the entire weekly pattern for one caregiver. $intervals: array of
+//   ['day_of_week'=>0..6, 'start_time'=>'HH:MM', 'end_time'=>'HH:MM',
+//    'status'=>'preferred|available|unavailable', 'notes'=>?string]
+// Caller is responsible for coalescing contiguous same-status cells; this
+// function just validates + writes the rows verbatim.
+function cg_setCaregiverAvailability($caregiver_id, array $intervals) {
+    global $db;
+    $caregiver_id = (int)$caregiver_id;
+    if ($caregiver_id <= 0) throw new Exception('Invalid caregiver.');
+
+    $allowed_status = ['preferred', 'available', 'unavailable'];
+    $clean = [];
+    foreach ($intervals as $iv) {
+        $dow = isset($iv['day_of_week']) ? (int)$iv['day_of_week'] : -1;
+        if ($dow < 0 || $dow > 6) throw new Exception('day_of_week must be 0..6.');
+        $st = cg_normalizeTime($iv['start_time'] ?? '');
+        $en = cg_normalizeTime($iv['end_time']   ?? '');
+        if ($st === null || $en === null) throw new Exception('Invalid time format.');
+        if ($en <= $st) throw new Exception('end_time must be after start_time on the same day.');
+        $status = $iv['status'] ?? '';
+        if (!in_array($status, $allowed_status, true)) throw new Exception('Invalid status.');
+        $notes = isset($iv['notes']) ? trim((string)$iv['notes']) : null;
+        if ($notes === '') $notes = null;
+        $clean[] = [$dow, $st, $en, $status, $notes];
+    }
+
+    // Replace all rows for this caregiver in one shot. No transactions in
+    // UserSpice's wrapper, so we accept a tiny gap where the row count is 0;
+    // the page reload after save would re-read either way.
+    $db->query('DELETE FROM cg_caregiver_availability WHERE caregiver_id = ?', [$caregiver_id]);
+    foreach ($clean as [$dow, $st, $en, $status, $notes]) {
+        $db->query(
+            'INSERT INTO cg_caregiver_availability
+               (caregiver_id, day_of_week, start_time, end_time, status, notes)
+             VALUES (?, ?, ?, ?, ?, ?)',
+            [$caregiver_id, $dow, $st, $en, $status, $notes]
+        );
+    }
+}
+
+function cg_getAvailabilityExceptions($caregiver_id, $from_date = null, $to_date = null) {
+    global $db;
+    $sql = 'SELECT id, caregiver_id, specific_date, start_time, end_time, status, reason
+              FROM cg_caregiver_availability_exception
+             WHERE caregiver_id = ?';
+    $params = [(int)$caregiver_id];
+    if ($from_date) { $sql .= ' AND specific_date >= ?'; $params[] = $from_date; }
+    if ($to_date)   { $sql .= ' AND specific_date <= ?'; $params[] = $to_date;   }
+    $sql .= ' ORDER BY specific_date, start_time';
+    return $db->query($sql, $params)->results();
+}
+
+function cg_addAvailabilityException($caregiver_id, $date, $start_time, $end_time, $status, $reason = null) {
+    global $db;
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$date)) throw new Exception('Date must be YYYY-MM-DD.');
+    $st = cg_normalizeTime($start_time);
+    $en = cg_normalizeTime($end_time);
+    if ($st === null || $en === null) throw new Exception('Invalid time format.');
+    if ($en <= $st) throw new Exception('end_time must be after start_time.');
+    if (!in_array($status, ['preferred','available','unavailable'], true)) throw new Exception('Invalid status.');
+    $reason = trim((string)$reason);
+    if ($reason === '') $reason = null;
+    $db->query(
+        'INSERT INTO cg_caregiver_availability_exception
+           (caregiver_id, specific_date, start_time, end_time, status, reason)
+         VALUES (?, ?, ?, ?, ?, ?)',
+        [(int)$caregiver_id, $date, $st, $en, $status, $reason]
+    );
+    return $db->lastId();
+}
+
+function cg_deleteAvailabilityException($exc_id) {
+    global $db;
+    $db->query('DELETE FROM cg_caregiver_availability_exception WHERE id = ?', [(int)$exc_id]);
+}
+
+function cg_getAvailabilityException($exc_id) {
+    global $db;
+    return $db->query(
+        'SELECT * FROM cg_caregiver_availability_exception WHERE id = ?',
+        [(int)$exc_id]
+    )->first();
+}
+
+// Convert a TIME string ('HH:MM[:SS]', 24:00 allowed) to a 30-min slot index
+// in [0, 48]. Non-half-hour values snap to the enclosing half-hour boundary
+// (we only ever write boundary times, so this is just defensive).
+function cg_timeToSlot($t) {
+    if (!preg_match('/^(\d{1,2}):(\d{2})/', (string)$t, $m)) return 0;
+    $minutes = ((int)$m[1]) * 60 + (int)$m[2];
+    return (int)round($minutes / 30);
+}
+
+// Resolve the effective availability for one caregiver on one date. Returns
+// a 48-entry array of statuses ('preferred'|'available'|'unavailable'|'unknown'),
+// indexed by 30-min slot from midnight. Weekly pattern is applied first; any
+// exception rows for that specific date override on top.
+function cg_resolveAvailabilityDay($caregiver_id, $date) {
+    global $db;
+    $dow = (int)date('w', strtotime($date));
+    $slots = array_fill(0, 48, 'unknown');
+
+    $weekly = $db->query(
+        'SELECT start_time, end_time, status
+           FROM cg_caregiver_availability
+          WHERE caregiver_id = ? AND day_of_week = ?',
+        [(int)$caregiver_id, $dow]
+    )->results();
+    foreach ($weekly as $w) {
+        $a = cg_timeToSlot($w->start_time);
+        $b = cg_timeToSlot($w->end_time);
+        for ($s = $a; $s < $b && $s < 48; $s++) $slots[$s] = $w->status;
+    }
+
+    $excs = $db->query(
+        'SELECT start_time, end_time, status
+           FROM cg_caregiver_availability_exception
+          WHERE caregiver_id = ? AND specific_date = ?',
+        [(int)$caregiver_id, $date]
+    )->results();
+    foreach ($excs as $e) {
+        $a = cg_timeToSlot($e->start_time);
+        $b = cg_timeToSlot($e->end_time);
+        for ($s = $a; $s < $b && $s < 48; $s++) $slots[$s] = $e->status;
+    }
+    return $slots;
+}
+
+// Build the 7-day × 48-slot heatmap matrix for a set of caregivers, anchored
+// to $week_start_date (Sunday). Returns:
+//   ['matrix' => [day][slot] => ['p','a','u','k' counts],
+//    'perCg'  => [cg_id => [day][slot] => 'preferred'|'available'|...]]
+// Caller layers caregiver name/color metadata around it.
+function cg_buildAvailabilityMatrix(array $caregiver_ids, $week_start_date) {
+    $matrix = [];
+    $perCg  = [];
+
+    for ($d = 0; $d < 7; $d++) {
+        for ($s = 0; $s < 48; $s++) {
+            $matrix[$d][$s] = ['p' => 0, 'a' => 0, 'u' => 0, 'k' => 0];
+        }
+    }
+
+    foreach ($caregiver_ids as $cg_id) {
+        $cg_id = (int)$cg_id;
+        $perCg[$cg_id] = [];
+        for ($d = 0; $d < 7; $d++) {
+            $date = date('Y-m-d', strtotime("$week_start_date +$d days"));
+            $statuses = cg_resolveAvailabilityDay($cg_id, $date);
+            $perCg[$cg_id][$d] = $statuses;
+            for ($s = 0; $s < 48; $s++) {
+                switch ($statuses[$s]) {
+                    case 'preferred':   $matrix[$d][$s]['p']++; break;
+                    case 'available':   $matrix[$d][$s]['a']++; break;
+                    case 'unavailable': $matrix[$d][$s]['u']++; break;
+                    default:            $matrix[$d][$s]['k']++; break;
+                }
+            }
+        }
+    }
+    return ['matrix' => $matrix, 'perCg' => $perCg];
+}
+
+// Sunday of the week containing $date_str (Y-m-d). PHP's 'w' weekday returns
+// 0 for Sunday, matching our day_of_week convention.
+function cg_weekStartSunday($date_str) {
+    $ts  = strtotime($date_str . ' 00:00:00');
+    $dow = (int)date('w', $ts);
+    return date('Y-m-d', strtotime("-$dow days", $ts));
+}
+
+// Accept 'H:i', 'HH:MM', or 'HH:MM:SS'. Returns 'HH:MM:SS' or null.
+// '24:00' and '24:00:00' are allowed (end-of-day boundary).
+function cg_normalizeTime($t) {
+    $t = trim((string)$t);
+    if ($t === '') return null;
+    if (!preg_match('/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/', $t, $m)) return null;
+    $h = (int)$m[1]; $i = (int)$m[2]; $s = isset($m[3]) ? (int)$m[3] : 0;
+    if ($h > 24 || $i > 59 || $s > 59) return null;
+    if ($h === 24 && ($i !== 0 || $s !== 0)) return null;
+    return sprintf('%02d:%02d:%02d', $h, $i, $s);
 }

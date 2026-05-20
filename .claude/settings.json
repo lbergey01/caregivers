@@ -80,7 +80,22 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" \"http://localhost/caregivers/cg/index.php\")",
       "Bash(mysql -h 192.168.1.95 -u root -pGotMilk#01 caregivers -e \"SELECT id, name FROM permissions ORDER BY id; SHOW TABLES LIKE 'cg_caregiver_audit';\")",
       "Bash(php -l c:/xampp/htdocs/caregivers/cg/api/shifts.php)",
-      "Bash(php -l c:/xampp/htdocs/caregivers/cg/index.php)"
+      "Bash(php -l c:/xampp/htdocs/caregivers/cg/index.php)",
+      "Bash(mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 caregivers -e \"SHOW TABLES\")",
+      "Bash(mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 caregivers -e \"DESCRIBE cg_caregivers; SELECT '---' as sep; DESCRIBE cg_shifts; SELECT '---' as sep; DESCRIBE cg_clients;\")",
+      "Bash(mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 caregivers -e \"SHOW TABLES LIKE 'cg_caregiver_availability%'\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" \"http://localhost/caregivers/cg/api/coverage.php?client_id=1&from=2026-05-20&to=2026-05-21\")",
+      "Bash(mysql.exe -h 192.168.1.95 -u root -pGotMilk#01 caregivers -e \"DESCRIBE cg_caregiver_availability; SELECT '---' as sep; DESCRIBE cg_caregiver_availability_exception;\")",
+      "Bash(curl -s -o /tmp/av.html -w \"HTTP %{http_code} | size %{size_download}\\\\n\" \"http://localhost/caregivers/cg/availability.php\")",
+      "Bash(curl -s -o /tmp/av_admin.html -w \"HTTP %{http_code} | size %{size_download}\\\\n\" \"http://localhost/caregivers/cg/admin_caregivers.php\")",
+      "Bash(php -l c:/xampp/htdocs/caregivers/cg/availability.php)",
+      "Bash(php -l c:/xampp/htdocs/caregivers/install/patches/2026-05-19_availability.php)",
+      "Bash(curl -s \"http://localhost/caregivers/cg/_av_test.php\")",
+      "Bash(curl -s -o /dev/null -w \"page HTTP %{http_code}\\\\n\" \"http://localhost/caregivers/cg/availability.php\")",
+      "Bash(php -l c:/xampp/htdocs/caregivers/cg/admin_availability_overview.php)",
+      "Bash(curl -s -o /tmp/ov.html -w \"page HTTP %{http_code} | size %{size_download}\\\\n\" \"http://localhost/caregivers/cg/admin_availability_overview.php\")",
+      "Bash(curl -s \"http://localhost/caregivers/cg/_ov_test.php\")",
+      "Bash(curl -s -o /dev/null -w \"page HTTP %{http_code}\\\\n\" \"http://localhost/caregivers/cg/admin_caregivers.php\")"
     ],
     "additionalDirectories": [
       "C:\\xampp\\htdocs\\caregivers\\.claude",

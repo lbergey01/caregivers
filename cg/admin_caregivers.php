@@ -71,6 +71,13 @@ $rows = $db->query(
 
 $us_users = $db->query('SELECT id, username, fname, lname FROM users WHERE active = 1 ORDER BY username')->results();
 
+// Which caregivers have any weekly-availability rows? Used to flag rows that
+// still need a schedule entered.
+$has_avail = [];
+foreach ($db->query('SELECT DISTINCT caregiver_id FROM cg_caregiver_availability')->results() as $a) {
+    $has_avail[(int)$a->caregiver_id] = true;
+}
+
 $is_admin = cg_isAdmin();
 
 require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
@@ -79,7 +86,8 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
   <h1>Caregivers</h1>
   <p>
     <a href="admin.php">&larr; Admin</a> &middot;
-    <a href="index.php">Calendar</a>
+    <a href="index.php">Calendar</a> &middot;
+    <a href="admin_availability_overview.php">Availability overview</a>
     <?php if ($is_admin): ?>
       &middot; <a href="admin_pay_rates.php">Pay rates &amp; differentials</a>
     <?php endif; ?>
@@ -104,7 +112,7 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
       <tr>
         <th>Name</th>
         <th>Phone</th>
-        <th class="text-end" style="width: 60px"></th>
+        <th class="text-end" style="width: 110px"></th>
       </tr>
     </thead>
     <tbody>
@@ -118,10 +126,18 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
           <?php if (!empty($r->notes)): ?>
             <span class="cg-note-flag" title="<?= htmlspecialchars($r->notes) ?>" aria-label="Has notes">📝</span>
           <?php endif; ?>
+          <?php if ($r->active && empty($has_avail[(int)$r->id])): ?>
+            <a href="availability.php?caregiver_id=<?= (int)$r->id ?>"
+               class="badge bg-warning text-dark text-decoration-none ms-1"
+               title="No weekly availability set — click to enter one">No schedule</a>
+          <?php endif; ?>
           <?php if (!$r->active): ?><small class="text-muted ms-1">(inactive)</small><?php endif; ?>
         </td>
         <td><?= htmlspecialchars((string)$r->phone) ?></td>
-        <td class="text-end">
+        <td class="text-end text-nowrap">
+          <a class="btn btn-sm btn-outline-secondary me-1"
+             href="availability.php?caregiver_id=<?= (int)$r->id ?>"
+             title="Edit availability" aria-label="Edit availability">🗓</a>
           <button type="button" class="btn btn-sm btn-outline-secondary"
                   data-bs-toggle="modal" data-bs-target="#<?= $modal_id ?>"
                   aria-label="Edit" title="Edit">
