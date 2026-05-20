@@ -14,11 +14,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $color   = preg_match('/^#[0-9a-fA-F]{6}$/', $_POST['color'] ?? '') ? $_POST['color'] : '#3788d8';
     $redirect_id = 0;
 
+    $notes = trim((string)($_POST['notes'] ?? ''));
+    if ($notes === '') $notes = null;
+
     if ($action === 'add') {
-        $db->query('INSERT INTO cg_caregivers (name, phone, email, user_id, color)
-                    VALUES (?, ?, ?, ?, ?)',
+        $db->query('INSERT INTO cg_caregivers (name, phone, email, user_id, color, notes)
+                    VALUES (?, ?, ?, ?, ?, ?)',
                    [trim($_POST['name']), trim($_POST['phone']), trim($_POST['email']),
-                    $user_id, $color]);
+                    $user_id, $color, $notes]);
         $redirect_id = (int)$db->lastId();
         if ($user_id) {
             $has = $db->query('SELECT 1 FROM user_permission_matches WHERE user_id=? AND permission_id=?',
@@ -35,9 +38,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $before_row = $db->query('SELECT * FROM cg_caregivers WHERE id = ?', [$id])->first();
         $before     = cg_caregiverSnapshot($before_row);
 
-        $db->query('UPDATE cg_caregivers SET name=?, phone=?, email=?, user_id=?, color=?, active=? WHERE id=?',
+        $db->query('UPDATE cg_caregivers SET name=?, phone=?, email=?, user_id=?, color=?, active=?, notes=? WHERE id=?',
                    [trim($_POST['name']), trim($_POST['phone']), trim($_POST['email']),
-                    $user_id, $color, !empty($_POST['active']) ? 1 : 0, $id]);
+                    $user_id, $color, !empty($_POST['active']) ? 1 : 0, $notes, $id]);
         if ($user_id) {
             $has = $db->query('SELECT 1 FROM user_permission_matches WHERE user_id=? AND permission_id=?',
                               [$user_id, CG_PERM_CAREGIVER])->count();
@@ -112,6 +115,9 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
         <td>
           <span class="cg-color-dot" style="background: <?= htmlspecialchars($r->color) ?>"></span>
           <?= htmlspecialchars($r->name) ?>
+          <?php if (!empty($r->notes)): ?>
+            <span class="cg-note-flag" title="<?= htmlspecialchars($r->notes) ?>" aria-label="Has notes">📝</span>
+          <?php endif; ?>
           <?php if (!$r->active): ?><small class="text-muted ms-1">(inactive)</small><?php endif; ?>
         </td>
         <td><?= htmlspecialchars((string)$r->phone) ?></td>
@@ -175,9 +181,14 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
             </select>
             <small class="text-muted">Linking a UserSpice user grants them the Caregiver permission.</small>
           </div>
-          <div class="form-check">
+          <div class="form-check mb-3">
             <input type="checkbox" class="form-check-input" name="active" value="1" id="active-<?= $r->id ?>" <?= $r->active ? 'checked' : '' ?>>
             <label class="form-check-label" for="active-<?= $r->id ?>">Active</label>
+          </div>
+          <div class="mb-1">
+            <label class="form-label">Notes</label>
+            <textarea class="form-control" name="notes" rows="3"
+                      placeholder="Days they can work, restrictions, anything to remember…"><?= htmlspecialchars((string)$r->notes) ?></textarea>
           </div>
         </div>
         <div class="modal-footer">
@@ -197,6 +208,11 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
     border: 1px solid rgba(0,0,0,0.15);
     margin-right: 6px;
     vertical-align: middle;
+  }
+  .cg-note-flag {
+    font-size: 14px;
+    margin-left: 6px;
+    cursor: help;        /* native tooltip from the title= attribute hints why */
   }
   @keyframes cgSavedFlash {
     0%   { box-shadow: inset 0 0 0 3px rgba(40, 167, 69, 0.55); }

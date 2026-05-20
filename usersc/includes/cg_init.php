@@ -22,6 +22,8 @@ require_once dirname(__DIR__, 2) . '/install/patches/2026-05-19_shift_audit.php'
 cg_patch_2026_05_19_shift_audit();
 require_once dirname(__DIR__, 2) . '/install/patches/2026-05-19_manager_and_caregiver_audit.php';
 cg_patch_2026_05_19_manager_and_caregiver_audit();
+require_once dirname(__DIR__, 2) . '/install/patches/2026-05-19_caregiver_notes.php';
+cg_patch_2026_05_19_caregiver_notes();
 
 // Auto-revive UserSpice session from a still-valid pwsms cookie. Skipped when
 // the user is already password-logged-in. Lets a returning caregiver land on
@@ -153,6 +155,7 @@ function cg_caregiverSnapshot($cg) {
         'diff_ot_add'   => isset($cg->diff_ot_add)     ? $cg->diff_ot_add         : null,
         'diff_hol_mult' => isset($cg->diff_hol_mult)   ? $cg->diff_hol_mult       : null,
         'diff_hol_add'  => isset($cg->diff_hol_add)    ? $cg->diff_hol_add        : null,
+        'notes'         => isset($cg->notes)           ? $cg->notes               : null,
     ];
 }
 
