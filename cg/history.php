@@ -45,10 +45,11 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
 
   <div class="mb-2">
     <input type="search" id="search" class="form-control form-control-sm"
-           placeholder="Search notes — type multiple words; partial matches OK">
+           placeholder="Search notes — type multiple words; partial matches OK"
+           autocomplete="off">
   </div>
 
-  <form id="filters" class="row g-2 mb-3">
+  <form id="filters" class="row g-2 mb-3" autocomplete="off">
     <?php if (count($clients) > 1): ?>
       <div class="col-6 col-md-3">
         <label class="form-label small mb-1">Client</label>
