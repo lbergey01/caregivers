@@ -199,8 +199,9 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
               <div class="d-flex gap-2 mt-2">
                 <button type="button" id="btnNotePhoto"   class="btn btn-outline-primary btn-sm">📷 Photo</button>
                 <button type="button" id="btnNoteAttach"  class="btn btn-outline-secondary btn-sm">📎 Attachment</button>
-                <div class="ms-auto">
-                  <button type="button" id="btnNotePost" class="btn btn-primary btn-sm">Save Note</button>
+                <div class="ms-auto d-flex gap-2">
+                  <button type="button" id="btnNotePost"   class="btn btn-outline-primary btn-sm">Save Note</button>
+                  <button type="button" id="btnNoteNotify" class="btn btn-primary btn-sm">Save &amp; Notify</button>
                 </div>
               </div>
               <div id="noteErr" class="text-danger small mt-1"></div>
@@ -721,44 +722,99 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
     });
   }
 
+  // Posts whatever is in the composer (textarea + pendingFiles) against `shiftId`,
+  // then clears the composer. Throws on note-create failure; surfaces per-file
+  // upload errors via the in-composer #noteErr element. Caller is responsible
+  // for refreshNotesList() / closing the modal as appropriate.
+  async function postPendingNote(shiftId) {
+    const body = document.getElementById('f_note_body').value.trim();
+    if (!body && !pendingFiles.length) return;
+
+    // Empty-body notes get a placeholder so the timestamp still has meaning.
+    const fd = new FormData();
+    fd.append('action', 'create');
+    fd.append('shift_id', shiftId);
+    fd.append('body', body || '(attachment)');
+    const cr = await fetch('api/notes.php', { method: 'POST', body: fd })
+      .then(r => r.json().then(j => ({ok: r.ok, body: j})));
+    if (!cr.ok) throw new Error(cr.body.error || 'Failed to post note');
+    const noteId = cr.body.id;
+
+    // Upload each pending file in sequence (sequential keeps mobile data sane)
+    for (const f of pendingFiles) {
+      const ufd = new FormData();
+      ufd.append('action', 'upload');
+      ufd.append('note_id', noteId);
+      ufd.append('file', f);
+      const ur = await fetch('api/attachment.php', { method: 'POST', body: ufd })
+        .then(r => r.json().then(j => ({ok: r.ok, body: j})));
+      if (!ur.ok) setNoteFeedback(`Some files failed: ${ur.body.error || 'upload error'}`, 'error');
+    }
+    document.getElementById('f_note_body').value = '';
+    pendingFiles = [];
+    renderPending();
+  }
+
+  // Sets noteErr to error/success styling. The element ships with .text-danger
+  // baked in, so both Save Note and Save & Notify need to flip it explicitly.
+  function setNoteFeedback(msg, mode /* 'error' | 'success' | 'clear' */) {
+    const el = document.getElementById('noteErr');
+    el.textContent = msg || '';
+    el.classList.toggle('text-danger',  mode === 'error');
+    el.classList.toggle('text-success', mode === 'success');
+  }
+
   document.getElementById('btnNotePost').addEventListener('click', async function() {
-    const errEl = document.getElementById('noteErr');
-    errEl.textContent = '';
+    setNoteFeedback('', 'clear');
     const body = document.getElementById('f_note_body').value.trim();
     if (!body && !pendingFiles.length) {
-      errEl.textContent = 'Add text or at least one photo/attachment.';
+      setNoteFeedback('Add text or at least one photo/attachment.', 'error');
       return;
     }
     this.disabled = true;
     try {
-      // Empty-body notes get a placeholder so the timestamp still has meaning.
-      const fd = new FormData();
-      fd.append('action', 'create');
-      fd.append('shift_id', notesShiftId);
-      fd.append('body', body || '(attachment)');
-      const cr = await fetch('api/notes.php', { method: 'POST', body: fd })
-        .then(r => r.json().then(j => ({ok: r.ok, body: j})));
-      if (!cr.ok) throw new Error(cr.body.error || 'Failed to post note');
-      const noteId = cr.body.id;
-
-      // Upload each pending file in sequence (sequential keeps mobile data sane)
-      for (const f of pendingFiles) {
-        const ufd = new FormData();
-        ufd.append('action', 'upload');
-        ufd.append('note_id', noteId);
-        ufd.append('file', f);
-        const ur = await fetch('api/attachment.php', { method: 'POST', body: ufd })
-          .then(r => r.json().then(j => ({ok: r.ok, body: j})));
-        if (!ur.ok) errEl.textContent = `Some files failed: ${ur.body.error || 'upload error'}`;
-      }
-      document.getElementById('f_note_body').value = '';
-      pendingFiles = [];
-      renderPending();
+      await postPendingNote(notesShiftId);
       refreshNotesList();
     } catch (e) {
-      errEl.textContent = e.message;
+      setNoteFeedback(e.message, 'error');
     } finally {
       this.disabled = false;
+    }
+  });
+
+  // Save & Notify: post the note, then SMS-blast everyone with the Notify
+  // permission. Note save and notify are independent — if the SMS step fails,
+  // the note is still saved (we just surface the error).
+  document.getElementById('btnNoteNotify').addEventListener('click', async function() {
+    setNoteFeedback('', 'clear');
+    const body = document.getElementById('f_note_body').value.trim();
+    if (!body && !pendingFiles.length) {
+      setNoteFeedback('Add text or at least one photo/attachment.', 'error');
+      return;
+    }
+    const others = [document.getElementById('btnNotePost')];
+    this.disabled = true;
+    others.forEach(b => b.disabled = true);
+    try {
+      await postPendingNote(notesShiftId);
+      refreshNotesList();
+      const fd = new FormData();
+      fd.append('action', 'notify');
+      fd.append('shift_id', notesShiftId);
+      const nr = await fetch('api/notes.php', { method: 'POST', body: fd })
+        .then(r => r.json().then(j => ({ok: r.ok, body: j})));
+      if (!nr.ok) throw new Error(nr.body.error || 'Notify failed');
+      const { sent, recipients, failed, skipped } = nr.body;
+      let summary = `Sent to ${sent}/${recipients}.`;
+      if (skipped && skipped.length) summary += ` No phone: ${skipped.join(', ')}.`;
+      if (failed && failed.length)   summary += ` Failed: ${failed.join('; ')}.`;
+      const clean = !failed?.length && !skipped?.length && sent > 0;
+      setNoteFeedback(summary, clean ? 'success' : 'error');
+    } catch (e) {
+      setNoteFeedback(e.message, 'error');
+    } finally {
+      this.disabled = false;
+      others.forEach(b => b.disabled = false);
     }
   });
 
@@ -824,9 +880,12 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
     return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
   }
 
-  document.getElementById('shiftForm').addEventListener('submit', function(e) {
+  document.getElementById('shiftForm').addEventListener('submit', async function(e) {
     e.preventDefault();
     const id = $('f_id').value;
+    const errEl = document.getElementById('shiftFormErr');
+    errEl.classList.add('d-none');
+
     const fd = new FormData();
     fd.append('action', id ? 'update' : 'create');
     if (id) fd.append('id', id);
@@ -835,28 +894,46 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
     fd.append('start_dt', toMySQL($('f_start').value));
     fd.append('end_dt',   toMySQL($('f_end').value));
 
-    fetch('api/shifts.php', { method: 'POST', body: fd })
-      .then(r => r.json().then(j => ({ok: r.ok, body: j})))
-      .then(({ok, body}) => {
-        if (!ok) throw new Error(body.error || 'Save failed');
-        cal.refetchEvents();
-        if (cal.view.type === 'dayGridMonth') paintMonthCells(cal.view.currentStart.toISOString(), cal.view.currentEnd.toISOString());
+    try {
+      const sr = await fetch('api/shifts.php', { method: 'POST', body: fd })
+        .then(r => r.json().then(j => ({ok: r.ok, body: j})));
+      if (!sr.ok) throw new Error(sr.body.error || 'Save failed');
 
-        // After a new shift is created, stay in the modal and switch to edit mode
-        // so the user can immediately start posting notes/photos.
-        if (!id && body.id) {
-          $('f_id').value = body.id;
-          document.getElementById('shiftModalTitle').textContent = 'Edit Shift';
-          $('btnDelete').classList.remove('d-none');
-          setNotesShift(body.id, true);
-        } else {
-          modal.hide();
+      cal.refetchEvents();
+      if (cal.view.type === 'dayGridMonth') paintMonthCells(cal.view.currentStart.toISOString(), cal.view.currentEnd.toISOString());
+
+      // If the user typed in the note composer (or queued attachments) and hit
+      // Save instead of Save Note, post it as part of Save so nothing is lost.
+      // notesShiftId is only set when the composer is visible (i.e. editing an
+      // existing shift), so this branch never fires for a brand-new shift.
+      const shiftId = id || sr.body.id;
+      const hasPendingNote = !!document.getElementById('f_note_body').value.trim() || pendingFiles.length > 0;
+      if (hasPendingNote && notesShiftId === shiftId) {
+        try {
+          await postPendingNote(shiftId);
+        } catch (noteErr) {
+          // Shift is saved; surface the note failure in the composer and keep
+          // the modal open so the user can retry without retyping.
+          setNoteFeedback(noteErr.message, 'error');
+          refreshNotesList();
+          return;
         }
-      })
-      .catch(err => {
-        const e = document.getElementById('shiftFormErr');
-        e.textContent = err.message; e.classList.remove('d-none');
-      });
+      }
+
+      // After a new shift is created, stay in the modal and switch to edit mode
+      // so the user can immediately start posting notes/photos.
+      if (!id && sr.body.id) {
+        $('f_id').value = sr.body.id;
+        document.getElementById('shiftModalTitle').textContent = 'Edit Shift';
+        $('btnDelete').classList.remove('d-none');
+        setNotesShift(sr.body.id, true);
+      } else {
+        modal.hide();
+      }
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.classList.remove('d-none');
+    }
   });
 
   document.getElementById('btnDelete').addEventListener('click', function() {

@@ -38,8 +38,10 @@ if ($method === 'GET' && $action === 'recent') {
         $params[] = $_GET['from'];
         $params[] = $_GET['to'];
     } else {
-        $hours = max(1, (int)($_GET['hours'] ?? 24));
-        if (!$is_admin) $hours = min($hours, 24);   // non-admin cap
+        // Default window: 7 days. Non-admin cap matches the default so the
+        // unprivileged history view still loads the full week.
+        $hours = max(1, (int)($_GET['hours'] ?? 168));
+        if (!$is_admin) $hours = min($hours, 168);
         $since = date('Y-m-d H:i:s', time() - $hours * 3600);
         $where[] = 'n.created_at >= ?';
         $params[] = $since;
@@ -190,6 +192,64 @@ if ($action === 'delete') {
     if (!cg_canDeleteNote($note)) jerr(403, 'Only admins can delete notes.');
     cg_deleteNote($id);
     echo json_encode(['ok' => true]);
+    exit;
+}
+
+if ($action === 'notify') {
+    // SMS-blast managers (anyone holding the "Notify" permission) that a note
+    // was just posted on this shift. The caller is expected to have already
+    // POST-ed the note via action=create; this endpoint only sends the alert.
+    $shift_id = (int)($_POST['shift_id'] ?? 0);
+    if (!$shift_id) jerr(400, 'shift_id required.');
+    $shift = cg_getShift($shift_id);
+    if (!$shift) jerr(404, 'Shift not found.');
+
+    // Same gate as posting a note on this shift.
+    if (!$is_admin && (!$me_cg || (int)$shift->caregiver_id !== (int)$me_cg->id)) {
+        jerr(403, 'Not allowed.');
+    }
+
+    require_once $abs_us_root . $us_url_root . 'usersc/includes/sms.php';
+
+    // Anyone with the Notify permission AND a linked, active caregiver row.
+    // Excludes the current user — no point texting yourself.
+    $recipients = $db->query(
+        "SELECT c.id AS caregiver_id, c.user_id, c.name AS caregivername, c.phone, c.email
+           FROM permissions p
+           JOIN user_permission_matches m ON m.permission_id = p.id
+           JOIN cg_caregivers c          ON c.user_id = m.user_id
+          WHERE p.name = 'Notify' AND c.active = 1 AND c.user_id <> ?",
+        [(int)$user->data()->id]
+    )->results();
+
+    // Absolute link back to the shift-log history page.
+    $proto = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https://' : 'http://';
+    $link  = $proto . $_SERVER['HTTP_HOST'] . $us_url_root . 'cg/history.php';
+
+    $sender_name = $me_cg ? $me_cg->name
+                : trim(($user->data()->fname ?? '') . ' ' . ($user->data()->lname ?? ''));
+    if ($sender_name === '') $sender_name = $user->data()->username ?? 'Someone';
+    $when = date('M j g:ia', strtotime($shift->start_dt));
+    $msg  = "{$sender_name} posted a shift note ({$when}). View: {$link}";
+
+    $sent = 0; $failed = []; $skipped = [];
+    foreach ($recipients as $r) {
+        $phone = preg_replace('/\D/', '', (string)$r->phone);
+        if ($phone === '') { $skipped[] = $r->caregivername; continue; }
+        try {
+            cg_sendSMS($r->phone, $msg);
+            $sent++;
+        } catch (Throwable $e) {
+            $failed[] = $r->caregivername . ': ' . $e->getMessage();
+        }
+    }
+    echo json_encode([
+        'ok'         => true,
+        'recipients' => count($recipients),
+        'sent'       => $sent,
+        'failed'     => $failed,
+        'skipped'    => $skipped,
+    ]);
     exit;
 }
 

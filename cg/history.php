@@ -37,6 +37,11 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
     <a class="btn btn-sm btn-outline-secondary" href="index.php">&larr; Calendar</a>
   </div>
 
+  <div class="mb-2">
+    <input type="search" id="search" class="form-control form-control-sm"
+           placeholder="Search notes — type multiple words; partial matches OK">
+  </div>
+
   <form id="filters" class="row g-2 mb-3">
     <?php if (count($clients) > 1): ?>
       <div class="col-6 col-md-3">
@@ -76,7 +81,7 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
       </div>
     <?php else: ?>
       <div class="col-12">
-        <small class="text-muted">Showing notes from the last 24 hours across all caregivers.</small>
+        <small class="text-muted">Showing notes from the last 7 days across all caregivers.</small>
       </div>
     <?php endif; ?>
   </form>
@@ -91,6 +96,11 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
   const IS_ADMIN = <?= $is_admin ? 'true' : 'false' ?>;
   const list = document.getElementById('historyList');
   const filters = document.getElementById('filters');
+  const searchEl = document.getElementById('search');
+
+  // Loaded rows are cached so search filtering is purely client-side; only the
+  // date-range filters (admin) trigger a refetch.
+  let allRows = [];
 
   function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]);}
   function fmtTs(dt){if(!dt)return'';const d=new Date(dt.replace(' ','T'));return isNaN(d)?dt:d.toLocaleString([],{dateStyle:'medium',timeStyle:'short'});}
@@ -103,17 +113,33 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
     params.set('action', 'recent');
     new FormData(filters).forEach((v,k) => { if (v) params.set(k, v); });
     if (!IS_ADMIN || (!params.get('from') && !params.get('to'))) {
-      params.set('hours', '24');
+      params.set('hours', '168');   // 7 days
     }
     list.innerHTML = '<div class="text-muted">Loading…</div>';
     fetch('api/notes.php?' + params.toString())
       .then(r => r.json())
-      .then(rows => render(rows))
+      .then(rows => { allRows = rows; applyFilter(); })
       .catch(() => list.innerHTML = '<div class="text-danger">Failed to load.</div>');
   }
 
+  // DataTables-style filter: whitespace-split tokens, each must appear as a
+  // substring (case-insensitive) somewhere in the row's searchable fields.
+  function applyFilter() {
+    const q = (searchEl.value || '').trim().toLowerCase();
+    const terms = q ? q.split(/\s+/) : [];
+    const rows = terms.length === 0 ? allRows : allRows.filter(n => {
+      const hay = [
+        n.author_name, n.shift_caregiver_name, n.body,
+        fmtTs(n.created_at), fmtShift(n.shift_start, n.shift_end)
+      ].join(' ').toLowerCase();
+      return terms.every(t => hay.includes(t));
+    });
+    render(rows);
+  }
+
   function render(rows) {
-    if (!rows.length) { list.innerHTML = '<div class="text-muted">No notes in this range.</div>'; return; }
+    if (!allRows.length) { list.innerHTML = '<div class="text-muted">No notes in this range.</div>'; return; }
+    if (!rows.length)    { list.innerHTML = '<div class="text-muted">No notes match this search.</div>'; return; }
     list.innerHTML = '';
     rows.forEach(n => list.appendChild(renderNote(n)));
   }
@@ -159,6 +185,7 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
   filters.addEventListener('change', () => { /* admin's caregiver/client picker can auto-apply */
     if (IS_ADMIN) load();
   });
+  searchEl.addEventListener('input', applyFilter);
   load();
 })();
 </script>

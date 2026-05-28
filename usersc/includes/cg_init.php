@@ -26,6 +26,8 @@ require_once dirname(__DIR__, 2) . '/install/patches/2026-05-19_caregiver_notes.
 cg_patch_2026_05_19_caregiver_notes();
 require_once dirname(__DIR__, 2) . '/install/patches/2026-05-19_availability.php';
 cg_patch_2026_05_19_availability();
+require_once dirname(__DIR__, 2) . '/install/patches/2026-05-28_notify_permission.php';
+cg_patch_2026_05_28_notify_permission();
 
 // Auto-revive UserSpice session from a still-valid pwsms cookie. Skipped when
 // the user is already password-logged-in. Lets a returning caregiver land on
