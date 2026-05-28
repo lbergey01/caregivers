@@ -29,6 +29,12 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
     border: 1px solid #ccc; border-radius: 6px; background: #f8f9fa;
     text-decoration: none; padding: 4px;
   }
+  mark {
+    background: #ffd54f;
+    color: #000;
+    padding: 0 2px;
+    border-radius: 2px;
+  }
 </style>
 
 <main class="container my-3">
@@ -101,8 +107,21 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
   // Loaded rows are cached so search filtering is purely client-side; only the
   // date-range filters (admin) trigger a refetch.
   let allRows = [];
+  let currentTerms = [];
 
   function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]);}
+
+  // Escape, then wrap any case-insensitive matches of the active search terms
+  // in <mark>. Safe for user-content slots in innerHTML; do NOT use for
+  // attribute-context strings (colors, hrefs).
+  function hi(text) {
+    const safe = escapeHtml(text == null ? '' : text);
+    if (!currentTerms.length) return safe;
+    const pattern = currentTerms
+      .map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('|');
+    return safe.replace(new RegExp(pattern, 'gi'), m => `<mark>${m}</mark>`);
+  }
   function fmtTs(dt){if(!dt)return'';const d=new Date(dt.replace(' ','T'));return isNaN(d)?dt:d.toLocaleString([],{dateStyle:'medium',timeStyle:'short'});}
   function fmtShift(s,e){const a=new Date(s.replace(' ','T')),b=new Date(e.replace(' ','T'));
     const f={dateStyle:'medium',timeStyle:'short'};
@@ -126,13 +145,13 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
   // substring (case-insensitive) somewhere in the row's searchable fields.
   function applyFilter() {
     const q = (searchEl.value || '').trim().toLowerCase();
-    const terms = q ? q.split(/\s+/) : [];
-    const rows = terms.length === 0 ? allRows : allRows.filter(n => {
+    currentTerms = q ? q.split(/\s+/) : [];
+    const rows = currentTerms.length === 0 ? allRows : allRows.filter(n => {
       const hay = [
         n.author_name, n.shift_caregiver_name, n.body,
         fmtTs(n.created_at), fmtShift(n.shift_start, n.shift_end)
       ].join(' ').toLowerCase();
-      return terms.every(t => hay.includes(t));
+      return currentTerms.every(t => hay.includes(t));
     });
     render(rows);
   }
@@ -150,13 +169,13 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
     const shiftDate = n.shift_start ? n.shift_start.slice(0,10) : '';
     wrap.innerHTML =
       `<div class="meta">
-         <span class="chip" style="background:${escapeHtml(n.shift_caregiver_color||'#888')};">${escapeHtml(n.shift_caregiver_name||'Shift')}</span>
-         <strong>${escapeHtml(n.author_name)}</strong>
-         · ${escapeHtml(fmtTs(n.created_at))}
+         <span class="chip" style="background:${escapeHtml(n.shift_caregiver_color||'#888')};">${hi(n.shift_caregiver_name||'Shift')}</span>
+         <strong>${hi(n.author_name)}</strong>
+         · ${hi(fmtTs(n.created_at))}
          ${n.edited_at ? `<span class="fst-italic"> (edited ${escapeHtml(fmtTs(n.edited_at))})</span>` : ''}
-         · <a class="shift-link" href="index.php?goto=${shiftDate}&shift=${n.shift_id}">View shift (${escapeHtml(fmtShift(n.shift_start, n.shift_end))})</a>
+         · <a class="shift-link" href="index.php?goto=${shiftDate}&shift=${n.shift_id}">View shift (${hi(fmtShift(n.shift_start, n.shift_end))})</a>
        </div>
-       <div class="body">${escapeHtml(n.body)}</div>`;
+       <div class="body">${hi(n.body)}</div>`;
     if (n.attachments && n.attachments.length) {
       const strip = document.createElement('div');
       strip.className = 'd-flex flex-wrap gap-2 mt-2';
