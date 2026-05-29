@@ -250,8 +250,22 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
 
   const isNarrow = () => window.matchMedia('(max-width: 768px)').matches;
 
+  // Restore the last view + date the user was looking at. Survives page
+  // reloads (including mobile pull-to-refresh) within the same tab; closing
+  // the tab clears it so a fresh session lands on today. URL ?goto= still
+  // wins — that logic runs after init and explicitly calls gotoDate().
+  const CAL_STATE_KEY = 'cgCalState';
+  const savedCalState = (() => {
+    try { return JSON.parse(sessionStorage.getItem(CAL_STATE_KEY) || 'null'); }
+    catch (e) { return null; }
+  })();
+  const VALID_VIEWS = ['timeGridDay', 'timeGridWeek', 'dayGridMonth'];
+
   const cal = new FullCalendar.Calendar(document.getElementById('calendar'), {
-    initialView: isNarrow() ? 'timeGridDay' : 'timeGridWeek',
+    initialView: (savedCalState && VALID_VIEWS.includes(savedCalState.view))
+      ? savedCalState.view
+      : (isNarrow() ? 'timeGridDay' : 'timeGridWeek'),
+    initialDate: savedCalState?.date || undefined,
     headerToolbar: {
       left: 'prev,next today',
       center: 'title',
@@ -296,6 +310,19 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
       // Show the dedicated tap-to-navigate lanes only in day view.
       document.getElementById('calWrap')
         .classList.toggle('cg-day-view', info.view.type === 'timeGridDay');
+      // Persist current view + date so pull-to-refresh on mobile doesn't
+      // bounce the user back to today. currentStart is the first visible day
+      // of the active view (the day itself in day view). Format from LOCAL
+      // getters — toISOString() shifts the date in positive-UTC timezones.
+      try {
+        const d = info.view.currentStart;
+        const pad = n => String(n).padStart(2, '0');
+        const dateStr = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+        sessionStorage.setItem(CAL_STATE_KEY, JSON.stringify({
+          view: info.view.type,
+          date: dateStr,
+        }));
+      } catch (e) { /* sessionStorage unavailable — silent no-op */ }
     },
     // Drag-to-select (desktop) creates an exact-range shift.
     select: function(info) {
