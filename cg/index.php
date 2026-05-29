@@ -244,6 +244,11 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
   // The name is kept for historical reasons; the meaning is the broader permission.
   const IS_ADMIN   = <?= $is_manager ? 'true' : 'false' ?>;
   const IS_VISITOR = <?= $is_visitor ? 'true' : 'false' ?>;
+  // Mirror of cg_canViewOthersNotes() — single capability gate. Admin/manager/
+  // caregiver get true here; visitors get false. Use this (not IS_VISITOR) for
+  // any "can this user see this shift's notes?" decision, because users can
+  // hold multiple perms (e.g. admin + visitor) and IS_VISITOR alone misjudges.
+  const CAN_VIEW_OTHERS_NOTES = <?= cg_canViewOthersNotes() ? 'true' : 'false' ?>;
   const ME_CG_ID   = <?= $me_cg ? (int)$me_cg->id : 'null' ?>;
   const CLIENT_ID  = <?= (int)$default_cid ?>;
   let currentClient = CLIENT_ID;
@@ -515,18 +520,25 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
     $('btnNotePost').classList.add('btn-primary');
   }
 
+  // Open the next modal only after the choice modal is fully hidden. Bootstrap
+  // gets into a confused body/backdrop state if a second show() fires while
+  // the first is still animating out — on some mobile browsers that can leave
+  // the second modal partially-rendered (notes section invisible, etc.).
+  function afterChoiceClosed(fn) {
+    choiceModalEl.addEventListener('hidden.bs.modal', fn, { once: true });
+    choiceModal.hide();
+  }
+
   $('btnChoiceExisting').addEventListener('click', () => {
     const ev = _choiceEvent; if (!ev) return;
-    choiceModal.hide();
-    openExistingShift(ev);
+    afterChoiceClosed(() => openExistingShift(ev));
   });
   $('btnChoiceOverlap').addEventListener('click', () => {
     const ev = _choiceEvent; if (!ev) return;
-    choiceModal.hide();
     // New shift pre-filled with the existing shift's time range. User adjusts
     // start/end (and caregiver, if admin) to whatever the overlapping activity
     // needs.
-    openShiftModal({ start: ev.start, end: ev.end });
+    afterChoiceClosed(() => openShiftModal({ start: ev.start, end: ev.end }));
   });
 
   function toLocalInput(d) {
@@ -595,10 +607,12 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
     $('btnDelete').classList.toggle('d-none', !editing || !canEdit || hasNotes);
     modalEl.querySelector('button[type="submit"]').classList.toggle('d-none', !canEdit);
 
-    // Notes timeline: only shows after the shift exists. Visitors only see
-    // notes on their own shifts (server enforces the same; this just hides UI).
+    // Notes timeline: only shows after the shift exists. Anyone with general
+    // note-view capability sees them; otherwise only on the user's own shift.
+    // (Server enforces the same — this just hides UI early to avoid an empty
+    // section flash.)
     const isOwnShift = opts.caregiver_id && ME_CG_ID && (+opts.caregiver_id === ME_CG_ID);
-    const canReadNotes = !IS_VISITOR || isOwnShift;
+    const canReadNotes = CAN_VIEW_OTHERS_NOTES || isOwnShift;
     setNotesShift(editing ? opts.id : null, canEdit, canReadNotes);
 
     modal.show();
