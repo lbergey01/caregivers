@@ -33,6 +33,14 @@ if ($method === 'GET' && $action === 'recent') {
     $where  = ['s.client_id = ?'];
     $params = [$client_id];
 
+    // Visitor scope: only notes they authored. cg_canViewOthersNotes is the
+    // single capability gate — future roles (e.g. VisitorClinical) widen this
+    // helper without touching the query.
+    if (!cg_canViewOthersNotes()) {
+        $where[] = 'n.author_user_id = ?';
+        $params[] = (int)$user->data()->id;
+    }
+
     if ($is_admin && !empty($_GET['from']) && !empty($_GET['to'])) {
         $where[] = 'n.created_at BETWEEN ? AND ?';
         $params[] = $_GET['from'];
@@ -110,6 +118,13 @@ if ($method === 'GET' && $action === 'list') {
     if (!$shift_id) jerr(400, 'shift_id required.');
 
     $notes = cg_listNotes($shift_id);
+
+    // Visitor scope: hide notes they did not author.
+    if (!cg_canViewOthersNotes()) {
+        $uid = (int)$user->data()->id;
+        $notes = array_values(array_filter($notes, fn($n) => (int)$n->author_user_id === $uid));
+    }
+
     if (!$notes) { echo '[]'; exit; }
 
     // Pull all attachments for these notes in one query
@@ -199,6 +214,8 @@ if ($action === 'notify') {
     // SMS-blast managers (anyone holding the "Notify" permission) that a note
     // was just posted on this shift. The caller is expected to have already
     // POST-ed the note via action=create; this endpoint only sends the alert.
+    if (cg_isVisitor()) jerr(403, 'Visitors cannot trigger notifications.');
+
     $shift_id = (int)($_POST['shift_id'] ?? 0);
     if (!$shift_id) jerr(400, 'shift_id required.');
     $shift = cg_getShift($shift_id);

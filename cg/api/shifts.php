@@ -40,8 +40,13 @@ if ($method === 'GET') {
     foreach ($shifts as $s) {
         $can_edit = $is_admin || ($me_cg && (int)$s->caregiver_id === (int)$me_cg->id);
         $note_count = (int)($s->note_count ?? 0);
+        // Visitor shifts get a " (visit)" suffix so the calendar visually
+        // distinguishes family-visit blocks from real care coverage.
         // Trailing asterisk marks shifts that have notes — easy to scan, no icon font needed.
-        $title = $s->caregiver_name . ($note_count > 0 ? ' *' : '');
+        $is_visit = (($s->caregiver_role ?? 'caregiver') === 'visitor');
+        $title = $s->caregiver_name
+               . ($is_visit ? ' (visit)' : '')
+               . ($note_count > 0 ? ' *' : '');
         $events[] = [
             'id'          => (int)$s->id,
             'title'       => $title,
@@ -51,10 +56,11 @@ if ($method === 'GET') {
             'borderColor'     => $s->caregiver_color,
             'editable'    => $can_edit,
             'extendedProps' => [
-                'kind'         => 'shift',
-                'caregiver_id' => (int)$s->caregiver_id,
-                'can_edit'     => $can_edit,
-                'note_count'   => $note_count,
+                'kind'           => 'shift',
+                'caregiver_id'   => (int)$s->caregiver_id,
+                'caregiver_role' => $s->caregiver_role ?? 'caregiver',
+                'can_edit'       => $can_edit,
+                'note_count'     => $note_count,
             ],
         ];
     }

@@ -7,8 +7,11 @@ if (!$user->isLoggedIn()) { Redirect::to($us_url_root . 'users/login.php'); die(
 $is_admin    = cg_isAdmin();
 $is_manager  = cg_isManager(); // admin OR manager
 $is_cg       = cg_isCaregiver();
+$is_visitor  = cg_isVisitor();
 $me_cg       = cg_currentCaregiver();
-$caregivers  = cg_caregiversAll(true);
+// Scheduling dropdown: caregivers only (plus the user's own row if they're a
+// visitor) so a large visitor roster doesn't clutter the "+ Add Shift" picker.
+$caregivers  = cg_caregiversForScheduling();
 $clients     = cg_clientsAll(true);
 $default_cid = cg_defaultClientId();
 
@@ -104,7 +107,7 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
         <button id="btnAddShift" class="btn btn-sm btn-primary">+ Add Shift</button>
       <?php endif; ?>
       <a class="btn btn-sm btn-outline-secondary" href="history.php">History</a>
-      <?php if ($me_cg && !$is_manager): ?>
+      <?php if ($me_cg && !$is_manager && !$is_visitor): ?>
         <a class="btn btn-sm btn-outline-secondary" href="availability.php">My Availability</a>
       <?php endif; ?>
       <?php if ($is_manager): ?>
@@ -131,6 +134,28 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
     </button>
   </div>
 </main>
+
+<!-- Choice prompt shown when tapping an existing shift. Lets the user pick
+     between opening the existing shift (edit or view-only, depending on perms)
+     and creating an overlapping shift in the same time slot. -->
+<div class="modal fade" id="shiftChoiceModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">What would you like to do?</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small mb-3" id="choiceContext"></p>
+        <div class="d-grid gap-2">
+          <button type="button" id="btnChoiceExisting" class="btn btn-primary">Edit this shift</button>
+          <button type="button" id="btnChoiceOverlap"  class="btn btn-outline-primary">Add an overlapping shift</button>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- Add / Edit Shift modal -->
 <div class="modal fade" id="shiftModal" tabindex="-1">
@@ -217,9 +242,10 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
 (function(){
   // IS_ADMIN = "can act on anyone's shift" — true for admins AND managers.
   // The name is kept for historical reasons; the meaning is the broader permission.
-  const IS_ADMIN  = <?= $is_manager ? 'true' : 'false' ?>;
-  const ME_CG_ID  = <?= $me_cg ? (int)$me_cg->id : 'null' ?>;
-  const CLIENT_ID = <?= (int)$default_cid ?>;
+  const IS_ADMIN   = <?= $is_manager ? 'true' : 'false' ?>;
+  const IS_VISITOR = <?= $is_visitor ? 'true' : 'false' ?>;
+  const ME_CG_ID   = <?= $me_cg ? (int)$me_cg->id : 'null' ?>;
+  const CLIENT_ID  = <?= (int)$default_cid ?>;
   let currentClient = CLIENT_ID;
 
   const isNarrow = () => window.matchMedia('(max-width: 768px)').matches;
@@ -291,14 +317,26 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
     },
     eventClick: function(info) {
       if (info.event.extendedProps.kind !== 'shift') return;
-      openShiftModal({
-        id:           info.event.id,
-        start:        info.event.start,
-        end:          info.event.end,
-        caregiver_id: info.event.extendedProps.caregiver_id,
-        can_edit:     info.event.extendedProps.can_edit,
-        note_count:   info.event.extendedProps.note_count || 0
-      });
+      const ev = info.event;
+      const canEdit = ev.extendedProps.can_edit;
+
+      // Admin: always show the choice modal so they can pick edit vs. add overlap.
+      // Non-admin tapping their own shift: edit directly (the common case).
+      // Visitor tapping someone else's shift: overlap-only (notes are hidden
+      // from visitors, so "View" would just show an empty shift).
+      // Regular caregiver tapping someone else's: view vs. add overlap.
+      if (IS_ADMIN) {
+        openShiftChoice(ev, { canEdit: true });
+      } else if (canEdit) {
+        openExistingShift(ev);
+      } else if (IS_VISITOR) {
+        openShiftChoice(ev, { canEdit: false, hideExisting: true });
+      } else if (ME_CG_ID !== null) {
+        openShiftChoice(ev, { canEdit: false });
+      } else {
+        // No add or edit rights at all — fall back to read-only view.
+        openExistingShift(ev);
+      }
     },
     eventDrop:   function(info) { persistEventChange(info, 'Move'); },
     eventResize: function(info) { persistEventChange(info, 'Resize'); }
@@ -404,6 +442,66 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
   const modal    = new bootstrap.Modal(modalEl);
   const $        = (id) => document.getElementById(id);
 
+  /* ---------- Edit-vs-Overlap choice modal ----------
+   * Shown when tapping an existing shift event. Sets a single closure variable
+   * so the two action buttons (registered once below) can read the active
+   * event without re-binding handlers each call.
+   */
+  const choiceModalEl = document.getElementById('shiftChoiceModal');
+  const choiceModal   = new bootstrap.Modal(choiceModalEl);
+  let   _choiceEvent  = null;
+
+  function openExistingShift(ev) {
+    openShiftModal({
+      id:           ev.id,
+      start:        ev.start,
+      end:          ev.end,
+      caregiver_id: ev.extendedProps.caregiver_id,
+      can_edit:     ev.extendedProps.can_edit,
+      note_count:   ev.extendedProps.note_count || 0
+    });
+  }
+
+  // opts = { canEdit: bool, hideExisting?: bool }
+  // hideExisting=true (visitor on someone else's shift): only the "Add
+  // overlapping" button is shown — no edit/view option since notes are hidden.
+  function openShiftChoice(ev, opts) {
+    _choiceEvent = ev;
+    const cgName = ev.title || 'another caregiver';
+    const fmt = d => d.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+    const range = `${fmt(ev.start)} – ${fmt(ev.end)}`;
+    $('btnChoiceExisting').classList.toggle('d-none', !!opts.hideExisting);
+    $('btnChoiceExisting').textContent = opts.canEdit ? 'Edit this shift' : 'View this shift';
+    $('choiceContext').textContent =
+      opts.canEdit
+        ? `${cgName}: ${range}`
+        : `This time slot has ${cgName}'s shift (${range}).`;
+    choiceModal.show();
+  }
+
+  // Visitors don't get the Save & Notify button — server rejects notify from
+  // them, so hiding it is purely UX clarity. Promote Save Note to primary so
+  // they still have a clear default action.
+  if (IS_VISITOR) {
+    $('btnNoteNotify').classList.add('d-none');
+    $('btnNotePost').classList.remove('btn-outline-primary');
+    $('btnNotePost').classList.add('btn-primary');
+  }
+
+  $('btnChoiceExisting').addEventListener('click', () => {
+    const ev = _choiceEvent; if (!ev) return;
+    choiceModal.hide();
+    openExistingShift(ev);
+  });
+  $('btnChoiceOverlap').addEventListener('click', () => {
+    const ev = _choiceEvent; if (!ev) return;
+    choiceModal.hide();
+    // New shift pre-filled with the existing shift's time range. User adjusts
+    // start/end (and caregiver, if admin) to whatever the overlapping activity
+    // needs.
+    openShiftModal({ start: ev.start, end: ev.end });
+  });
+
   function toLocalInput(d) {
     const pad = n => n.toString().padStart(2, '0');
     return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -470,8 +568,11 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
     $('btnDelete').classList.toggle('d-none', !editing || !canEdit || hasNotes);
     modalEl.querySelector('button[type="submit"]').classList.toggle('d-none', !canEdit);
 
-    // Notes timeline: only shows after the shift exists.
-    setNotesShift(editing ? opts.id : null, canEdit);
+    // Notes timeline: only shows after the shift exists. Visitors only see
+    // notes on their own shifts (server enforces the same; this just hides UI).
+    const isOwnShift = opts.caregiver_id && ME_CG_ID && (+opts.caregiver_id === ME_CG_ID);
+    const canReadNotes = !IS_VISITOR || isOwnShift;
+    setNotesShift(editing ? opts.id : null, canEdit, canReadNotes);
 
     modal.show();
   }
@@ -481,12 +582,15 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
   let notesCanWrite = false;
   let pendingFiles = [];   // files queued in the composer for the next "Post note"
 
-  function setNotesShift(shiftId, canWrite) {
+  // canRead=false hides the whole section (visitor opening someone else's
+  // shift — they can't see those notes). canWrite=false hides only the
+  // composer (regular caregiver viewing another's shift — read-only).
+  function setNotesShift(shiftId, canWrite, canRead) {
     notesShiftId = shiftId;
     notesCanWrite = !!canWrite;
     pendingFiles = [];
     const sec = document.getElementById('notesSection');
-    if (!shiftId) { sec.classList.add('d-none'); return; }
+    if (!shiftId || canRead === false) { sec.classList.add('d-none'); return; }
     sec.classList.remove('d-none');
     document.getElementById('f_note_body').value = '';
     document.getElementById('notePending').innerHTML = '';
@@ -921,12 +1025,13 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
       }
 
       // After a new shift is created, stay in the modal and switch to edit mode
-      // so the user can immediately start posting notes/photos.
+      // so the user can immediately start posting notes/photos. The user just
+      // created this shift, so it's theirs — notes are both readable and writable.
       if (!id && sr.body.id) {
         $('f_id').value = sr.body.id;
         document.getElementById('shiftModalTitle').textContent = 'Edit Shift';
         $('btnDelete').classList.remove('d-none');
-        setNotesShift(sr.body.id, true);
+        setNotesShift(sr.body.id, true, true);
       } else {
         modal.hide();
       }

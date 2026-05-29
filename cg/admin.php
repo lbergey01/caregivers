@@ -25,6 +25,7 @@ $cg_audit_recent   = (int)$db->query('SELECT COUNT(*) AS n FROM cg_caregiver_aud
 // Each section has an `admin_only` flag. Managers see the rest.
 $sections = [
     ['admin_caregivers.php',     'Caregivers',       "$cg_count active",          'Add or edit caregivers, link logins, set colors.',                false],
+    ['admin_caregivers_import.php','Bulk import',    '',                          'Upload a CSV of caregivers or visitors. Idempotent on phone.',     false],
     ['admin_availability_overview.php', 'Availability', "$av_cg_count of $cg_count set", 'Weekly heatmap of who is available — find gaps. Edit each caregiver from Caregivers › 🗓.', false],
     ['admin_pay_rates.php',      'Pay Rates',        '',                          'Per-caregiver rate, payable flag, and overnight/holiday differentials.', true],
     ['admin_clients.php',        'Clients',          "$cl_count active",          'Manage the people receiving care.',                                true],

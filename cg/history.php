@@ -5,9 +5,13 @@ require_once $abs_us_root . $us_url_root . 'usersc/includes/cg_init.php';
 if (!$user->isLoggedIn()) { Redirect::to($us_url_root . 'users/login.php'); die(); }
 
 $is_admin    = cg_isAdmin();
-$caregivers  = cg_caregiversAll(true);
+// Pull both roles so the admin filter can group them; the template renders
+// caregivers and visitors in separate <optgroup>s below.
+$caregivers  = cg_caregiversAll(true, null);
 $clients     = cg_clientsAll(true);
 $default_cid = cg_defaultClientId();
+$caregivers_only = array_values(array_filter($caregivers, fn($c) => ($c->role ?? 'caregiver') === 'caregiver'));
+$visitors_only   = array_values(array_filter($caregivers, fn($c) => ($c->role ?? 'caregiver') === 'visitor'));
 
 require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
 ?>
@@ -78,9 +82,18 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
         <label class="form-label small mb-1">Caregiver</label>
         <select name="caregiver_id" class="form-select form-select-sm">
           <option value="">All</option>
-          <?php foreach ($caregivers as $c): ?>
-            <option value="<?= $c->id ?>"><?= htmlspecialchars($c->name) ?></option>
-          <?php endforeach; ?>
+          <optgroup label="Caregivers">
+            <?php foreach ($caregivers_only as $c): ?>
+              <option value="<?= $c->id ?>"><?= htmlspecialchars($c->name) ?></option>
+            <?php endforeach; ?>
+          </optgroup>
+          <?php if (!empty($visitors_only)): ?>
+            <optgroup label="Visitors">
+              <?php foreach ($visitors_only as $c): ?>
+                <option value="<?= $c->id ?>"><?= htmlspecialchars($c->name) ?></option>
+              <?php endforeach; ?>
+            </optgroup>
+          <?php endif; ?>
         </select>
       </div>
       <div class="col-6 col-md-1 d-flex align-items-end">

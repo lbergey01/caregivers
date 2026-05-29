@@ -12,25 +12,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action  = $_POST['action'] ?? '';
     $user_id = (!empty($_POST['user_id'])) ? (int)$_POST['user_id'] : null;
     $color   = preg_match('/^#[0-9a-fA-F]{6}$/', $_POST['color'] ?? '') ? $_POST['color'] : '#3788d8';
+    $role    = ($_POST['role'] ?? '') === 'visitor' ? 'visitor' : 'caregiver';
     $redirect_id = 0;
 
     $notes = trim((string)($_POST['notes'] ?? ''));
     if ($notes === '') $notes = null;
 
     if ($action === 'add') {
-        $db->query('INSERT INTO cg_caregivers (name, phone, email, user_id, color, notes)
-                    VALUES (?, ?, ?, ?, ?, ?)',
+        $db->query('INSERT INTO cg_caregivers (name, phone, email, user_id, role, color, notes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)',
                    [trim($_POST['name']), trim($_POST['phone']), trim($_POST['email']),
-                    $user_id, $color, $notes]);
+                    $user_id, $role, $color, $notes]);
         $redirect_id = (int)$db->lastId();
-        if ($user_id) {
-            $has = $db->query('SELECT 1 FROM user_permission_matches WHERE user_id=? AND permission_id=?',
-                              [$user_id, CG_PERM_CAREGIVER])->count();
-            if (!$has) {
-                $db->query('INSERT INTO user_permission_matches (user_id, permission_id) VALUES (?, ?)',
-                           [$user_id, CG_PERM_CAREGIVER]);
-            }
-        }
+        cg_syncRolePermission($user_id, $role);
         $fresh = $db->query('SELECT * FROM cg_caregivers WHERE id = ?', [$redirect_id])->first();
         cg_logCaregiverAudit($redirect_id, 'insert', null, cg_caregiverSnapshot($fresh));
     } elseif ($action === 'update' && !empty($_POST['id'])) {
@@ -38,17 +32,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $before_row = $db->query('SELECT * FROM cg_caregivers WHERE id = ?', [$id])->first();
         $before     = cg_caregiverSnapshot($before_row);
 
-        $db->query('UPDATE cg_caregivers SET name=?, phone=?, email=?, user_id=?, color=?, active=?, notes=? WHERE id=?',
+        $db->query('UPDATE cg_caregivers SET name=?, phone=?, email=?, user_id=?, role=?, color=?, active=?, notes=? WHERE id=?',
                    [trim($_POST['name']), trim($_POST['phone']), trim($_POST['email']),
-                    $user_id, $color, !empty($_POST['active']) ? 1 : 0, $notes, $id]);
-        if ($user_id) {
-            $has = $db->query('SELECT 1 FROM user_permission_matches WHERE user_id=? AND permission_id=?',
-                              [$user_id, CG_PERM_CAREGIVER])->count();
-            if (!$has) {
-                $db->query('INSERT INTO user_permission_matches (user_id, permission_id) VALUES (?, ?)',
-                           [$user_id, CG_PERM_CAREGIVER]);
-            }
-        }
+                    $user_id, $role, $color, !empty($_POST['active']) ? 1 : 0, $notes, $id]);
+        cg_syncRolePermission($user_id, $role);
         $after_row = $db->query('SELECT * FROM cg_caregivers WHERE id = ?', [$id])->first();
         $after     = cg_caregiverSnapshot($after_row);
         if ($before !== $after) {
@@ -87,7 +74,8 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
   <p>
     <a href="admin.php">&larr; Admin</a> &middot;
     <a href="index.php">Calendar</a> &middot;
-    <a href="admin_availability_overview.php">Availability overview</a>
+    <a href="admin_availability_overview.php">Availability overview</a> &middot;
+    <a href="admin_caregivers_import.php">Bulk import</a>
     <?php if ($is_admin): ?>
       &middot; <a href="admin_pay_rates.php">Pay rates &amp; differentials</a>
     <?php endif; ?>
@@ -95,13 +83,19 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
   <?php if ($saved_id): ?><div class="alert alert-success">Saved.</div><?php endif; ?>
 
   <div class="card mb-4">
-    <div class="card-header">Add Caregiver</div>
+    <div class="card-header">Add Caregiver or Visitor</div>
     <div class="card-body">
       <form method="post" class="row g-2">
         <input type="hidden" name="action" value="add">
-        <div class="col-md-5 col-12"><input name="name"  class="form-control" placeholder="Name" required></div>
-        <div class="col-md-4 col-9"><input name="phone" class="form-control" placeholder="Phone"></div>
-        <div class="col-md-3 col-3"><button class="btn btn-primary w-100">Add</button></div>
+        <div class="col-md-4 col-12"><input name="name"  class="form-control" placeholder="Name" required></div>
+        <div class="col-md-3 col-7"><input name="phone" class="form-control" placeholder="Phone"></div>
+        <div class="col-md-3 col-5">
+          <select name="role" class="form-select">
+            <option value="caregiver" selected>Caregiver</option>
+            <option value="visitor">Visitor (family/friends)</option>
+          </select>
+        </div>
+        <div class="col-md-2 col-12"><button class="btn btn-primary w-100">Add</button></div>
       </form>
       <small class="text-muted">Email, linked login, color, and active-state are set via the row's pencil button.</small>
     </div>
@@ -119,14 +113,18 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
     <?php foreach ($rows as $r):
         $modal_id = 'cgModal' . (int)$r->id;
     ?>
+      <?php $is_visit_row = (($r->role ?? 'caregiver') === 'visitor'); ?>
       <tr id="cg-<?= $r->id ?>" class="<?= ($saved_id === (int)$r->id) ? 'cg-just-saved' : '' ?> <?= $r->active ? '' : 'opacity-50' ?>">
         <td>
           <span class="cg-color-dot" style="background: <?= htmlspecialchars($r->color) ?>"></span>
           <?= htmlspecialchars($r->name) ?>
+          <?php if ($is_visit_row): ?>
+            <span class="badge bg-info text-dark ms-1">visitor</span>
+          <?php endif; ?>
           <?php if (!empty($r->notes)): ?>
             <span class="cg-note-flag" title="<?= htmlspecialchars($r->notes) ?>" aria-label="Has notes">📝</span>
           <?php endif; ?>
-          <?php if ($r->active && empty($has_avail[(int)$r->id])): ?>
+          <?php if ($r->active && !$is_visit_row && empty($has_avail[(int)$r->id])): ?>
             <a href="availability.php?caregiver_id=<?= (int)$r->id ?>"
                class="badge bg-warning text-dark text-decoration-none ms-1"
                title="No weekly availability set — click to enter one">No schedule</a>
@@ -135,9 +133,11 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
         </td>
         <td><?= htmlspecialchars((string)$r->phone) ?></td>
         <td class="text-end text-nowrap">
-          <a class="btn btn-sm btn-outline-secondary me-1"
-             href="availability.php?caregiver_id=<?= (int)$r->id ?>"
-             title="Edit availability" aria-label="Edit availability">🗓</a>
+          <?php if (!$is_visit_row): ?>
+            <a class="btn btn-sm btn-outline-secondary me-1"
+               href="availability.php?caregiver_id=<?= (int)$r->id ?>"
+               title="Edit availability" aria-label="Edit availability">🗓</a>
+          <?php endif; ?>
           <button type="button" class="btn btn-sm btn-outline-secondary"
                   data-bs-toggle="modal" data-bs-target="#<?= $modal_id ?>"
                   aria-label="Edit" title="Edit">
@@ -172,11 +172,19 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
             <input class="form-control" name="name" value="<?= htmlspecialchars($r->name) ?>" required>
           </div>
           <div class="row g-2 mb-3">
-            <div class="col-7">
+            <div class="col-5">
               <label class="form-label">Phone</label>
               <input class="form-control" name="phone" value="<?= htmlspecialchars((string)$r->phone) ?>">
             </div>
-            <div class="col-5">
+            <div class="col-4">
+              <label class="form-label">Role</label>
+              <?php $row_role = ($r->role ?? 'caregiver'); ?>
+              <select name="role" class="form-select">
+                <option value="caregiver" <?= $row_role === 'caregiver' ? 'selected' : '' ?>>Caregiver</option>
+                <option value="visitor"   <?= $row_role === 'visitor'   ? 'selected' : '' ?>>Visitor</option>
+              </select>
+            </div>
+            <div class="col-3">
               <label class="form-label">Color</label>
               <input type="color" name="color" class="form-control form-control-color w-100" value="<?= htmlspecialchars($r->color) ?>">
             </div>
@@ -195,7 +203,7 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
                 </option>
               <?php endforeach; ?>
             </select>
-            <small class="text-muted">Linking a UserSpice user grants them the Caregiver permission.</small>
+            <small class="text-muted">Linking grants the matching permission (Caregiver or Visitor) to the user account and revokes the opposite — keeps role flips clean.</small>
           </div>
           <div class="form-check mb-3">
             <input type="checkbox" class="form-check-input" name="active" value="1" id="active-<?= $r->id ?>" <?= $r->active ? 'checked' : '' ?>>

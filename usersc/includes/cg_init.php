@@ -6,6 +6,7 @@ if (!defined('CG_PERM_CAREGIVER')) {
     define('CG_PERM_CAREGIVER', 3);   // permissions.id seeded by install_cg_schema.sql
     define('CG_PERM_ADMIN', 2);
     define('CG_PERM_MANAGER', 4);     // seeded by install/patches/2026-05-19_manager_and_caregiver_audit.php
+    define('CG_PERM_VISITOR', 6);     // seeded by install/patches/2026-05-28_visitor_role.php
 }
 
 // Idempotent SMS-settings seed. First page-load on a fresh install populates
@@ -28,6 +29,8 @@ require_once dirname(__DIR__, 2) . '/install/patches/2026-05-19_availability.php
 cg_patch_2026_05_19_availability();
 require_once dirname(__DIR__, 2) . '/install/patches/2026-05-28_notify_permission.php';
 cg_patch_2026_05_28_notify_permission();
+require_once dirname(__DIR__, 2) . '/install/patches/2026-05-28_visitor_role.php';
+cg_patch_2026_05_28_visitor_role();
 
 // Auto-revive UserSpice session from a still-valid pwsms cookie. Skipped when
 // the user is already password-logged-in. Lets a returning caregiver land on
@@ -76,6 +79,45 @@ function cg_isManager() {
     global $user;
     if (!$user || !$user->isLoggedIn()) return false;
     return hasPerm([CG_PERM_ADMIN, CG_PERM_MANAGER]);
+}
+
+// Visitor: a lightweight "caregiver" identity (family/friends) — can see the
+// calendar and post own notes, but cannot view others' notes or edit others'
+// shifts. They have a cg_caregivers row with role='visitor' for calendar
+// presence.
+function cg_isVisitor() {
+    global $user;
+    if (!$user || !$user->isLoggedIn()) return false;
+    return hasPerm([CG_PERM_VISITOR]);
+}
+
+// Capability gate for note visibility. Centralized here so a future role like
+// VisitorClinical (grandkid RN/CNA who SHOULD see clinical notes) is a one-line
+// addition; every notes API endpoint already consults this helper.
+function cg_canViewOthersNotes() {
+    if (cg_isManager()) return true;     // admin + manager
+    if (cg_isCaregiver()) return true;
+    // Visitors and unlinked users see only their own.
+    return false;
+}
+
+// Sync the linked user's permission grants to match the cg row's role. Grants
+// the matching permission and revokes the opposite, so role flips (visitor →
+// caregiver, etc.) don't leave stale capabilities. Called from the admin
+// caregiver editor and the bulk-import page.
+function cg_syncRolePermission($user_id, $role) {
+    global $db;
+    if (!$user_id) return;
+    $grant  = ($role === 'visitor') ? CG_PERM_VISITOR : CG_PERM_CAREGIVER;
+    $revoke = ($role === 'visitor') ? CG_PERM_CAREGIVER : CG_PERM_VISITOR;
+    $has = $db->query('SELECT 1 FROM user_permission_matches WHERE user_id=? AND permission_id=?',
+                      [$user_id, $grant])->count();
+    if (!$has) {
+        $db->query('INSERT INTO user_permission_matches (user_id, permission_id) VALUES (?, ?)',
+                   [$user_id, $grant]);
+    }
+    $db->query('DELETE FROM user_permission_matches WHERE user_id=? AND permission_id=?',
+               [$user_id, $revoke]);
 }
 
 // Caregiver row linked to currently logged-in user, or null.
@@ -151,6 +193,7 @@ function cg_caregiverSnapshot($cg) {
         'phone'         => $cg->phone,
         'email'         => $cg->email,
         'user_id'       => $cg->user_id !== null ? (int)$cg->user_id : null,
+        'role'          => $cg->role ?? 'caregiver',
         'color'         => $cg->color,
         'active'        => (int)$cg->active,
         'payable'       => isset($cg->payable)        ? (int)$cg->payable        : null,
@@ -200,7 +243,7 @@ function cg_getShifts($client_id, $from_dt, $to_dt) {
     // note_count surfaced as an asterisk on the calendar event so admins can
     // see at-a-glance which shifts have written notes attached.
     return $db->query(
-        'SELECT s.*, c.name AS caregiver_name, c.color AS caregiver_color,
+        'SELECT s.*, c.name AS caregiver_name, c.color AS caregiver_color, c.role AS caregiver_role,
                 (SELECT COUNT(*) FROM cg_shift_notes n WHERE n.shift_id = s.id) AS note_count
          FROM cg_shifts s
          JOIN cg_caregivers c ON c.id = s.caregiver_id
@@ -533,10 +576,35 @@ function cg_defaultClientId() {
     return (int)($s['default_client_id'] ?? 0);
 }
 
-function cg_caregiversAll($activeOnly = true) {
+// Role filter defaults to 'caregiver' so existing schedule pickers (Add Shift,
+// payroll, availability) don't pull a 50-grandchild visitor list. Pass null
+// to get both; pass 'visitor' to get just visitors.
+function cg_caregiversAll($activeOnly = true, $role = 'caregiver') {
     global $db;
-    $sql = 'SELECT * FROM cg_caregivers' . ($activeOnly ? ' WHERE active = 1' : '') . ' ORDER BY name';
-    return $db->query($sql)->results();
+    $where = [];
+    $params = [];
+    if ($activeOnly) $where[] = 'active = 1';
+    if ($role !== null) {
+        $where[] = 'role = ?';
+        $params[] = $role;
+    }
+    $sql = 'SELECT * FROM cg_caregivers';
+    if ($where) $sql .= ' WHERE ' . implode(' AND ', $where);
+    $sql .= ' ORDER BY name';
+    return $db->query($sql, $params)->results();
+}
+
+// Caregivers eligible for scheduling pickers. Adds the current user's own row
+// when they're a visitor (since the picker is locked to themselves and needs
+// the option to exist), but otherwise hides the full visitor roster.
+function cg_caregiversForScheduling() {
+    $rows = cg_caregiversAll(true, 'caregiver');
+    $me = cg_currentCaregiver();
+    if ($me && ($me->role ?? 'caregiver') === 'visitor') {
+        $rows[] = $me;
+        usort($rows, fn($a, $b) => strcmp($a->name, $b->name));
+    }
+    return $rows;
 }
 
 function cg_clientsAll($activeOnly = true) {
@@ -556,6 +624,12 @@ function cg_clientsAll($activeOnly = true) {
  */
 
 function cg_canEditAvailability($caregiver_id) {
+    global $db;
+    // Visitors don't have a weekly availability — they're ad-hoc by nature.
+    // Block both visitors editing themselves AND managers editing a visitor row.
+    $target = $db->query('SELECT role FROM cg_caregivers WHERE id = ?', [(int)$caregiver_id])->first();
+    if ($target && ($target->role ?? 'caregiver') === 'visitor') return false;
+
     if (cg_isManager()) return true;
     $me = cg_currentCaregiver();
     return $me && (int)$me->id === (int)$caregiver_id;
