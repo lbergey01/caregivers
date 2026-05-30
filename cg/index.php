@@ -106,6 +106,7 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
       <?php if ($is_manager || $me_cg): ?>
         <button id="btnAddShift" class="btn btn-sm btn-primary">+ Add Shift</button>
       <?php endif; ?>
+      <button id="btnInviteVisitor" class="btn btn-sm btn-outline-primary">Invite Visitor</button>
       <a class="btn btn-sm btn-outline-secondary" href="history.php">History</a>
       <?php if ($me_cg && !$is_manager && !$is_visitor): ?>
         <a class="btn btn-sm btn-outline-secondary" href="availability.php">My Availability</a>
@@ -149,10 +150,45 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
         <p class="text-muted small mb-3" id="choiceContext"></p>
         <div class="d-grid gap-2">
           <button type="button" id="btnChoiceExisting" class="btn btn-primary">Edit this shift</button>
+          <button type="button" id="btnChoiceNotes"    class="btn btn-outline-primary d-none">View notes</button>
           <button type="button" id="btnChoiceOverlap"  class="btn btn-outline-primary">Add an overlapping shift</button>
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
         </div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Invite Visitor modal -->
+<div class="modal fade" id="inviteVisitorModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content">
+      <form id="inviteVisitorForm">
+        <div class="modal-header">
+          <h5 class="modal-title">Invite Visitor</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p class="text-muted small mb-3">
+            They'll get a text with a link to sign in to the schedule.
+          </p>
+          <div class="mb-2">
+            <label class="form-label">Name</label>
+            <input type="text" name="name" id="iv_name" class="form-control" required autocomplete="name">
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Cell phone</label>
+            <input type="tel" name="phone" id="iv_phone" class="form-control" required
+                   inputmode="tel" placeholder="555-555-1234" autocomplete="tel">
+          </div>
+          <div id="inviteErr" class="alert alert-danger d-none mt-2 mb-0 py-2 small"></div>
+          <div id="inviteOk"  class="alert alert-success d-none mt-2 mb-0 py-2 small"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btnInviteSend">Send Invite</button>
+        </div>
+      </form>
     </div>
   </div>
 </div>
@@ -504,6 +540,17 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
     const range = `${fmt(ev.start)} – ${fmt(ev.end)}`;
     $('btnChoiceExisting').classList.toggle('d-none', !!opts.hideExisting);
     $('btnChoiceExisting').textContent = opts.canEdit ? 'Edit this shift' : 'View this shift';
+    // "View notes" is a dedicated button so users (especially admins, who
+    // otherwise only see "Edit this shift") realize notes are reachable
+    // without entering edit mode. Only show it when there's something to read
+    // AND this viewer is allowed to read it.
+    const noteCount = ev.extendedProps.note_count || 0;
+    const isOwnShift = ev.extendedProps.caregiver_id && ME_CG_ID
+                       && (+ev.extendedProps.caregiver_id === ME_CG_ID);
+    const canReadNotes = CAN_VIEW_OTHERS_NOTES || isOwnShift;
+    const showNotesBtn = noteCount > 0 && canReadNotes && !opts.hideExisting;
+    $('btnChoiceNotes').classList.toggle('d-none', !showNotesBtn);
+    $('btnChoiceNotes').textContent = `View notes (${noteCount})`;
     $('choiceContext').textContent =
       opts.canEdit
         ? `${cgName}: ${range}`
@@ -532,6 +579,20 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
   $('btnChoiceExisting').addEventListener('click', () => {
     const ev = _choiceEvent; if (!ev) return;
     afterChoiceClosed(() => openExistingShift(ev));
+  });
+  // "View notes" opens the same modal but forces view-only (can_edit=false)
+  // so the Save/Delete buttons and composer are hidden, making the intent
+  // unambiguous: this user came here to read, not edit.
+  $('btnChoiceNotes').addEventListener('click', () => {
+    const ev = _choiceEvent; if (!ev) return;
+    afterChoiceClosed(() => openShiftModal({
+      id:           ev.id,
+      start:        ev.start,
+      end:          ev.end,
+      caregiver_id: ev.extendedProps.caregiver_id,
+      can_edit:     false,
+      note_count:   ev.extendedProps.note_count || 0,
+    }));
   });
   $('btnChoiceOverlap').addEventListener('click', () => {
     const ev = _choiceEvent; if (!ev) return;
@@ -1165,6 +1226,51 @@ require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
         btn.textContent = 'timeline';
       });
   }
+})();
+
+/* ---------- Invite Visitor ---------- */
+(function() {
+  const btn = document.getElementById('btnInviteVisitor');
+  if (!btn) return;
+  const modalEl = document.getElementById('inviteVisitorModal');
+  const modal   = new bootstrap.Modal(modalEl);
+  const form    = document.getElementById('inviteVisitorForm');
+  const errEl   = document.getElementById('inviteErr');
+  const okEl    = document.getElementById('inviteOk');
+  const sendBtn = document.getElementById('btnInviteSend');
+
+  btn.addEventListener('click', () => {
+    form.reset();
+    errEl.classList.add('d-none'); errEl.textContent = '';
+    okEl.classList.add('d-none');  okEl.textContent = '';
+    sendBtn.disabled = false;
+    modal.show();
+  });
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errEl.classList.add('d-none'); errEl.textContent = '';
+    okEl.classList.add('d-none');  okEl.textContent = '';
+
+    const fd = new FormData();
+    fd.append('name',  document.getElementById('iv_name').value.trim());
+    fd.append('phone', document.getElementById('iv_phone').value.trim());
+
+    sendBtn.disabled = true;
+    try {
+      const r = await fetch('api/invite_visitor.php', { method: 'POST', body: fd });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'Invite failed.');
+      okEl.textContent = j.message || 'Invite sent.';
+      okEl.classList.remove('d-none');
+      // Auto-close after a beat so the inviter can fire off another invite quickly.
+      setTimeout(() => modal.hide(), 1500);
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.classList.remove('d-none');
+      sendBtn.disabled = false;
+    }
+  });
 })();
 </script>
 
